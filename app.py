@@ -4,14 +4,17 @@ from flask_cors import CORS
 from datetime import timedelta
 from extensions import db
 from routes.signup import signup_bp
-from routes.login import login_bp
+from routes.login import login_bp, setup_google_oauth
 from routes.products import products_bp
 from routes.order import order_bp
 from routes.admin_signup import admin_signup_bp
+from routes.wishlist import wishlist_bp
+
 # Import models
 from models.customer import Customer
 from models.product import Product, ProductImage
 from models.order import OrderHistory, OrderHistoryItem
+from models.cart import Cart, CartItem
 from flask import Flask, jsonify, send_from_directory
 
 
@@ -21,6 +24,17 @@ import secrets
 # Initialize Flask app
 # app = Flask(__name__)
 app = Flask(__name__, static_folder='static')
+
+client_id = os.getenv("GOOGLE_CLIENT_ID")
+client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+# Generate a secure secret key
+# app.config['SECRET_KEY'] = secrets.token_hex(32)
+
+# app.config['SECRET_KEY'] = "shrivarajunizationfaranfusion"
+
+# Google OAuth configuration
+app.config['GOOGLE_CLIENT_ID'] = client_id  # Replace with your Google Client ID
+app.config['GOOGLE_CLIENT_SECRET'] = client_secret # Replace with your Google Client Secret
 
 
 # Remove any duplicate static route definitions and use this:
@@ -61,12 +75,16 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=1)
 # Initialize extensions
 db.init_app(app)
 
+# Initialize Google OAuth
+setup_google_oauth(app)
+
 # Register blueprints
 app.register_blueprint(signup_bp)
 app.register_blueprint(login_bp)
 app.register_blueprint(products_bp)
 app.register_blueprint(order_bp)
 app.register_blueprint(admin_signup_bp)
+app.register_blueprint(wishlist_bp)
 
 @app.after_request
 def add_security_headers(response):
