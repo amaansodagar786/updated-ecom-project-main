@@ -32,11 +32,25 @@ def add_item_to_wishlist():
     if not product:
         return jsonify({'error': 'Product not found'}), 404
     
+
+    # Check if model exists if provided
+    if model_id:
+        model = ProductModel.query.get(model_id)
+        if not model:
+            return jsonify({'error': 'Invalid model ID'}), 400
+    
     # Check if color exists if provided
     if color_id:
-        product_color = ProductColor.query.get(color_id)
-        if not product_color:
-            return jsonify({'error': 'Product color not found'}), 404
+        color = ProductColor.query.get(color_id)
+        if not color:
+            return jsonify({'error': 'Invalid color ID'}), 400
+
+    # # Check if color exists if provided
+    # if color_id:
+    #     product_color = ProductColor.query.get(color_id)
+    #     if not product_color:
+    #         return jsonify({'error': 'Product color not found'}), 404
+    
     
     # Check if the user already has a wishlist, if not create one
     wishlist = Wishlist.query.filter_by(customer_id=request.current_user.customer_id).first()
