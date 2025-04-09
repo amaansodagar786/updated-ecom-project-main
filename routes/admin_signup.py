@@ -87,8 +87,8 @@ def admin_signup():
             mobile=data['mobile'].strip(),
             password=generate_password_hash(data['password']),
             role='admin',  # Set role to admin
-            is_verified=True,  # Auto-verify admin accounts
-            created_at=datetime.utcnow()
+            # is_verified=True,  
+            # created_at=datetime.utcnow()
         )
 
         db.session.add(new_admin)
@@ -97,12 +97,11 @@ def admin_signup():
         # Generate JWT token
         secret_key = current_app.config['SECRET_KEY']
         payload = {
-            'customer_id': new_admin.customer_id,
-            'email': new_admin.email,
-            'role': new_admin.role,
-            'is_verified': new_admin.is_verified,
-            'exp': datetime.utcnow() + timedelta(days=1)  # Token expires in 1 day
-        }
+    'customer_id': new_admin.customer_id,
+    'email': new_admin.email,
+    'role': new_admin.role,
+    'exp': datetime.utcnow() + timedelta(days=1)
+}
         token = jwt.encode(payload, secret_key, algorithm='HS256')
 
         # Prepare response
@@ -116,7 +115,7 @@ def admin_signup():
                 'email': new_admin.email,
                 'mobile': new_admin.mobile,
                 'role': new_admin.role,
-                'is_verified': new_admin.is_verified
+                # 'is_verified': new_admin.is_verified
             }
         }
 

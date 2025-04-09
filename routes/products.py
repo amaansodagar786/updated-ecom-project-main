@@ -1,59 +1,21 @@
+# NEW 
 import os
 from venv import logger
 from flask import Blueprint, request, jsonify, session
 from werkzeug.utils import secure_filename
 from extensions import db
-from models.product import Product, ProductImage, ProductModel, ProductColor, ProductSpecification, ModelSpecification
+from models.product import Product, ProductImage, ProductModel, ProductColor, ModelSpecification
 from models.category import Category, Subcategory
 from uuid import uuid4
 from middlewares.auth import token_required
+from datetime import datetime
+
 
 products_bp = Blueprint('products', __name__)
 
-
- 
-# PRODUCTS BY CATEGORY 
-
-@products_bp.route('/products/by-category/<int:category_id>', methods=['GET'])
-def get_products_by_category(category_id):
-    products = Product.query.filter_by(category_id=category_id).all()
-
-    result = []
-    for product in products:
-        result.append({
-            'product_id': product.product_id,
-            'name': product.name,
-            'description': product.description,
-            'category_id': product.category_id,
-            'subcategory_id': product.subcategory_id,
-            'product_type': product.product_type,
-            'rating': product.rating,
-            'raters': product.raters,
-            'created_at': product.created_at.isoformat(),
-            'updated_at': product.updated_at.isoformat(),
-            'unit': product.unit,
-            'images': [img.image_url for img in product.images],
-            'colors': [{
-                'color_id': color.color_id,
-                'name': color.name,
-                'price': float(color.price),
-                'stock_quantity': color.stock_quantity
-            } for color in product.colors],
-            'specifications': [{
-                'key': spec.key,
-                'value': spec.value
-            } for spec in product.specifications]
-        })
-
-    return jsonify(result), 200
-
-
-
-
-
 # List all products with their images and categories
 @products_bp.route('/products', methods=['GET'])
-def list_products():
+def list_products(): 
     try:
         products = Product.query.options(
             db.joinedload(Product.images),
@@ -75,108 +37,7 @@ def list_products():
                 'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
             }
             
-            # Add type-specific details
-            if product.product_type == 'single':
-                product_dict['unit'] = product.unit
-                product_dict['colors'] = []
-                
-                for color in product.colors:
-                    color_dict = {
-                        'color_id': color.color_id,
-                        'name': color.name,
-                        'stock_quantity': color.stock_quantity,
-                        'price': float(color.price),
-                        'original_price': float(color.original_price) if color.original_price else None,
-                        'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
-                    }
-                    product_dict['colors'].append(color_dict)
-                
-                product_dict['specifications'] = [
-                    {'key': spec.key, 'value': spec.value} for spec in product.specifications
-                ]
-            else:  # variable product
-                product_dict['models'] = []
-                
-                for model in product.models:
-                    model_dict = {
-                        'model_id': model.model_id,
-                        'name': model.name,
-                        'description': model.description,
-                        'colors': [],
-                        'specifications': [
-                            {'key': spec.key, 'value': spec.value} for spec in model.specifications
-                        ]
-                    }
-                    
-                    for color in model.colors:
-                        color_dict = {
-                            'color_id': color.color_id,
-                            'name': color.name,
-                            'stock_quantity': color.stock_quantity,
-                            'price': float(color.price),
-                            'original_price': float(color.original_price) if color.original_price else None,
-                            'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
-                        }
-                        model_dict['colors'].append(color_dict)
-                    
-                    product_dict['models'].append(model_dict)
-            
-            products_list.append(product_dict)
-
-        return jsonify(products_list)
-
-    except Exception as e:
-        logger.error(f"Error listing products: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-
-# Get product details by ID
-
-@products_bp.route('/product/<int:product_id>', methods=['GET'])
-def product_detail(product_id):
-    try:
-        product = Product.query.options(
-            db.joinedload(Product.images),
-            db.joinedload(Product.main_category),
-            db.joinedload(Product.sub_category),
-            db.joinedload(Product.models).joinedload(ProductModel.colors).joinedload(ProductColor.images),
-            db.joinedload(Product.models).joinedload(ProductModel.specifications),
-            db.joinedload(Product.specifications),
-            db.joinedload(Product.colors).joinedload(ProductColor.images)
-        ).get_or_404(product_id)
-
-        product_dict = {
-            'product_id': product.product_id,
-            'name': product.name,
-            'description': product.description,
-            'category': product.main_category.name if product.main_category else None,
-            'subcategory': product.sub_category.name if product.sub_category else None,
-            'product_type': product.product_type,
-            'rating': product.rating,
-            'raters': product.raters,
-            'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
-        }
-        
-        # Add type-specific details
-        if product.product_type == 'single':
-            product_dict['unit'] = product.unit
-            product_dict['colors'] = []
-            
-            for color in product.colors:
-                color_dict = {
-                    'color_id': color.color_id,
-                    'name': color.name,
-                    'stock_quantity': color.stock_quantity,
-                    'price': float(color.price),
-                    'original_price': float(color.original_price) if color.original_price else None,
-                    'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
-                }
-                product_dict['colors'].append(color_dict)
-            
-            product_dict['specifications'] = [
-                {'key': spec.key, 'value': spec.value} for spec in product.specifications
-            ]
-        else:  # variable product
+            # Add models for all product types
             product_dict['models'] = []
             
             for model in product.models:
@@ -202,6 +63,98 @@ def product_detail(product_id):
                     model_dict['colors'].append(color_dict)
                 
                 product_dict['models'].append(model_dict)
+            
+            # Add single product specific info
+            if product.product_type == 'single':
+                product_dict['unit'] = product.unit
+                product_dict['colors'] = []
+                
+                for color in product.colors:
+                    color_dict = {
+                        'color_id': color.color_id,
+                        'name': color.name,
+                        'stock_quantity': color.stock_quantity,
+                        'price': float(color.price),
+                        'original_price': float(color.original_price) if color.original_price else None,
+                        'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
+                    }
+                    product_dict['colors'].append(color_dict)
+            
+            products_list.append(product_dict)
+
+        return jsonify(products_list)
+
+    except Exception as e:
+        logger.error(f"Error listing products: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Get product details by product_id
+@products_bp.route('/product/<int:product_id>', methods=['GET'])
+def product_detail(product_id):
+    try:
+        product = Product.query.options(
+            db.joinedload(Product.images),
+            db.joinedload(Product.main_category),
+            db.joinedload(Product.sub_category),
+            db.joinedload(Product.models).joinedload(ProductModel.colors).joinedload(ProductColor.images),
+            db.joinedload(Product.models).joinedload(ProductModel.specifications),
+            db.joinedload(Product.colors).joinedload(ProductColor.images)
+        ).get_or_404(product_id)
+
+        product_dict = {
+            'product_id': product.product_id,
+            'name': product.name,
+            'description': product.description,
+            'category': product.main_category.name if product.main_category else None,
+            'subcategory': product.sub_category.name if product.sub_category else None,
+            'product_type': product.product_type,
+            'rating': product.rating,
+            'raters': product.raters,
+            'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
+        }
+        
+        # Add models for all product types
+        product_dict['models'] = []
+        
+        for model in product.models:
+            model_dict = {
+                'model_id': model.model_id,
+                'name': model.name,
+                'description': model.description,
+                'colors': [],
+                'specifications': [
+                    {'key': spec.key, 'value': spec.value} for spec in model.specifications
+                ]
+            }
+            
+            for color in model.colors:
+                color_dict = {
+                    'color_id': color.color_id,
+                    'name': color.name,
+                    'stock_quantity': color.stock_quantity,
+                    'price': float(color.price),
+                    'original_price': float(color.original_price) if color.original_price else None,
+                    'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
+                }
+                model_dict['colors'].append(color_dict)
+            
+            product_dict['models'].append(model_dict)
+        
+        # Add single product specific info
+        if product.product_type == 'single':
+            product_dict['unit'] = product.unit
+            product_dict['colors'] = []
+            
+            for color in product.colors:
+                color_dict = {
+                    'color_id': color.color_id,
+                    'name': color.name,
+                    'stock_quantity': color.stock_quantity,
+                    'price': float(color.price),
+                    'original_price': float(color.original_price) if color.original_price else None,
+                    'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
+                }
+                product_dict['colors'].append(color_dict)
         
         return jsonify(product_dict)
     
@@ -220,7 +173,7 @@ def get_categories():
             cat_dict = {
                 'category_id': category.category_id,
                 'name': category.name,
-                'image_url': category.image_url,  # Make sure this field exists in your Category model
+                'image_url':category.image_url,
                 'subcategories': []
             }
             
@@ -238,7 +191,12 @@ def get_categories():
         return jsonify({'error': str(e)}), 500
 
 UPLOAD_FOLDER = 'static/product_images'
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+ALLOWED_EXTENSIONS = {
+    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp',
+    'svg', 'ico', 'heif', 'heic', 'raw', 'psd', 'ai', 'eps', 'jfif',
+    'avif'
+}
+
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -254,6 +212,14 @@ def save_image(image_file):
         image_file.save(file_path)
         return f'/product_images/{filename}'
     return None
+
+
+
+
+
+
+
+
 
 @products_bp.route('/product/add', methods=['POST'])
 @token_required(roles=['admin'])
@@ -273,7 +239,7 @@ def add_product():
         
         # Check if we need to create a new category
         if not category_id and request.form.get('new_category'):
-            new_category = Category(name=request.form.get('new_category'),image_url=save_image(request.form.get('image')))
+            new_category = Category(name=request.form.get('new_category'),image_url=save_image(request.files.get('image')))
             db.session.add(new_category)
             db.session.commit()  # Get the ID without committing
             category_id = new_category.category_id
@@ -323,14 +289,23 @@ def add_product():
         if product_type == 'single':
             new_product.unit = int(request.form.get('unit', 1))
             
-            # Process specifications
+            # Create default model for single product
+            default_model = ProductModel(
+                product_id=new_product.product_id,
+                name=name,
+                description=description
+            )
+            db.session.add(default_model)
+            db.session.commit()  # Get the model ID
+            
+            # Process specifications using ModelSpecification
             specs_count = int(request.form.get('specs_count', 0))
             for i in range(specs_count):
                 spec_key = request.form.get(f'spec_key_{i}')
                 spec_value = request.form.get(f'spec_value_{i}')
                 if spec_key and spec_value:
-                    spec = ProductSpecification(
-                        product_id=new_product.product_id,
+                    spec = ModelSpecification(
+                        model_id=default_model.model_id,
                         key=spec_key,
                         value=spec_value
                     )
@@ -345,9 +320,10 @@ def add_product():
                 color_stock = request.form.get(f'color_stock_{i}', 0)
                 
                 if color_name and color_price:
-                    # Create color
+                    # Create color linked to both product and default model
                     color = ProductColor(
                         product_id=new_product.product_id,
+                        model_id=default_model.model_id,
                         name=color_name,
                         stock_quantity=int(color_stock),
                         price=float(color_price),
@@ -449,8 +425,6 @@ def add_product():
 
 
 
-# category add endpoint
-
 @products_bp.route('/category/add', methods=['POST'])
 @token_required(roles=['admin'])
 def add_category():
@@ -481,13 +455,10 @@ def add_category():
         return jsonify({'message': 'An error occurred while adding the category'}), 500
 
 
-
-
 # Add subcategory endpoint
 @products_bp.route('/subcategory/add', methods=['POST'])
 @token_required(roles=['admin'])
 def add_subcategory():
-
     try:
         name = request.json.get('name')
         category_id = request.json.get('category_id')
@@ -514,3 +485,534 @@ def add_subcategory():
         db.session.rollback()
         logger.error(f"Error adding subcategory: {str(e)}")
         return jsonify({'message': 'An error occurred while adding the subcategory'}), 500
+    
+
+@products_bp.route('/products/by-category/<int:category_id>', methods=['GET'])
+def get_products_by_category(category_id):
+    products = Product.query.filter_by(category_id=category_id).all()
+
+    result = []
+    for product in products:
+        result.append({
+            'product_id': product.product_id,
+            'name': product.name,
+            'description': product.description,
+            'category_id': product.category_id,
+            'subcategory_id': product.subcategory_id,
+            'product_type': product.product_type,
+            'rating': product.rating,
+            'raters': product.raters,
+            'created_at': product.created_at.isoformat(),
+            'updated_at': product.updated_at.isoformat(),
+            'unit': product.unit,
+            'images': [img.image_url for img in product.images],
+            'colors': [{
+                'color_id': color.color_id,
+                'name': color.name,
+                'price': float(color.price),
+                'stock_quantity': color.stock_quantity
+            } for color in product.colors],
+            'specifications': [{
+                'key': spec.key,
+                'value': spec.value
+            } for spec in product.specifications]
+        })
+
+    return jsonify(result), 200
+
+
+
+    # EDIT PRODUCTS 
+
+    
+# Update an entire product (PUT)
+@products_bp.route('/<int:product_id>', methods=['PUT'])
+def update_product(product_id):
+    product = Product.query.get_or_404(product_id)
+    data = request.form.to_dict() if request.form else request.json
+    
+    # Update basic product information
+    product.name = data.get('name', product.name)
+    product.description = data.get('description', product.description)
+    product.category_id = data.get('category_id', product.category_id)
+    product.subcategory_id = data.get('subcategory_id', product.subcategory_id)
+    product.product_type = data.get('product_type', product.product_type)
+    product.updated_at = datetime.utcnow()
+    
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Product updated successfully', 'product_id': product.product_id}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Partially update a product (PATCH)
+@products_bp.route('/<int:product_id>', methods=['PATCH'])
+def partially_update_product(product_id):
+    product = Product.query.get_or_404(product_id)
+    data = request.form.to_dict() if request.form else request.json
+    
+    # Update only the fields that are provided
+    if 'name' in data:
+        product.name = data['name']
+    if 'description' in data:
+        product.description = data['description']
+    if 'category_id' in data:
+        product.category_id = data['category_id']
+    if 'subcategory_id' in data:
+        product.subcategory_id = data['subcategory_id']
+    if 'product_type' in data:
+        product.product_type = data['product_type']
+  
+    
+    product.updated_at = datetime.utcnow()
+    
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Product partially updated', 'product_id': product.product_id}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+
+# Delete a product
+@products_bp.route('/<int:product_id>', methods=['DELETE'])
+def delete_product(product_id):
+    product = Product.query.get_or_404(product_id)
+    
+    # Get all image paths to delete files from filesystem
+    image_paths = []
+    for image in product.images:
+        if image.image_url and not image.image_url.startswith('http'):
+            image_paths.append(image.image_url.replace('/product_images/', ''))
+    
+    try:
+        # Delete product from database (cascade will handle related records)
+        db.session.delete(product)
+        db.session.commit()
+        
+        # Delete image files from filesystem
+        for img_path in image_paths:
+            try:
+                file_path = os.path.join(UPLOAD_FOLDER, img_path)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                # Log error but continue with other operations
+                print(f"Error deleting file {img_path}: {str(e)}")
+        
+        return jsonify({'message': 'Product deleted successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+
+# ----- Product Images Routes -----
+
+# Add new product image
+@products_bp.route('/<int:product_id>/images', methods=['POST'])
+def add_product_image(product_id):
+    product = Product.query.get_or_404(product_id)
+    
+    # Check if image file is provided
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image file provided'}), 400
+    
+    image_file = request.files['image']
+    image_url = save_image(image_file)
+    
+    if not image_url:
+        return jsonify({'error': 'Invalid image file'}), 400
+    
+    # Get color_id from form data if available
+    color_id = None
+    if request.form and 'color_id' in request.form:
+        color_id = request.form.get('color_id')
+    
+    new_image = ProductImage(
+        product_id=product_id,
+        color_id=color_id,
+        image_url=image_url
+    )
+    
+    try:
+        db.session.add(new_image)
+        db.session.commit()
+        return jsonify({
+            'message': 'Image added successfully',
+            'image_id': new_image.image_id,
+            'image_url': image_url
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Update product image
+@products_bp.route('/<int:product_id>/images/<int:image_id>', methods=['PUT'])
+def update_product_image(product_id, image_id):
+    image = ProductImage.query.get_or_404(image_id)
+    if image.product_id != product_id:
+        return jsonify({'error': 'Image does not belong to this product'}), 400
+    
+    old_image_path = None
+    if image.image_url and not image.image_url.startswith('http'):
+        old_image_path = image.image_url.replace('/product_images/', '')
+    
+    # Check if a new image file is provided
+    if 'image' in request.files:
+        image_file = request.files['image']
+        image_url = save_image(image_file)
+        
+        if image_url:
+            image.image_url = image_url
+    
+    # Update color_id if provided
+    if request.form and 'color_id' in request.form:
+        image.color_id = request.form.get('color_id')
+    
+    try:
+        db.session.commit()
+        
+        # Delete old image file if replaced
+        if old_image_path and image.image_url != f'/product_images/{old_image_path}':
+            try:
+                file_path = os.path.join(UPLOAD_FOLDER, old_image_path)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                # Log error but continue with other operations
+                print(f"Error deleting file {old_image_path}: {str(e)}")
+        
+        return jsonify({
+            'message': 'Image updated successfully',
+            'image_url': image.image_url
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Delete product image
+@products_bp.route('/<int:product_id>/images/<int:image_id>', methods=['DELETE'])
+def delete_product_image(product_id, image_id):
+    image = ProductImage.query.get_or_404(image_id)
+    if image.product_id != product_id:
+        return jsonify({'error': 'Image does not belong to this product'}), 400
+    
+    # Store image path to delete file after database record
+    image_path = None
+    if image.image_url and not image.image_url.startswith('http'):
+        image_path = image.image_url.replace('/product_images/', '')
+    
+    try:
+        db.session.delete(image)
+        db.session.commit()
+        
+        # Delete image file from filesystem
+        if image_path:
+            try:
+                file_path = os.path.join(UPLOAD_FOLDER, image_path)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                # Log error but continue with other operations
+                print(f"Error deleting file {image_path}: {str(e)}")
+        
+        return jsonify({'message': 'Image deleted successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# ----- Product Models Routes -----
+
+# Add new product model
+@products_bp.route('/<int:product_id>/models', methods=['POST'])
+def add_product_model(product_id):
+    product = Product.query.get_or_404(product_id)
+    data = request.form.to_dict() if request.form else request.json
+    
+    new_model = ProductModel(
+        product_id=product_id,
+        name=data['name'],
+        description=data['description']
+    )
+    
+    try:
+        db.session.add(new_model)
+        db.session.commit()
+        return jsonify({'message': 'Model added successfully', 'model_id': new_model.model_id}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Update product model
+@products_bp.route('/<int:product_id>/models/<int:model_id>', methods=['PUT'])
+def update_product_model(product_id, model_id):
+    model = ProductModel.query.get_or_404(model_id)
+    if model.product_id != product_id:
+        return jsonify({'error': 'Model does not belong to this product'}), 400
+        
+    data = request.form.to_dict() if request.form else request.json
+    
+    model.name = data.get('name', model.name)
+    model.description = data.get('description', model.description)
+    
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Model updated successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Delete product model
+@products_bp.route('/<int:product_id>/models/<int:model_id>', methods=['DELETE'])
+def delete_product_model(product_id, model_id):
+    model = ProductModel.query.get_or_404(model_id)
+    if model.product_id != product_id:
+        return jsonify({'error': 'Model does not belong to this product'}), 400
+    
+    try:
+        db.session.delete(model)
+        db.session.commit()
+        return jsonify({'message': 'Model deleted successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# ----- Product Colors Routes -----
+
+# Add new product color
+@products_bp.route('/<int:product_id>/colors', methods=['POST'])
+def add_product_color(product_id):
+    product = Product.query.get_or_404(product_id)
+    data = request.form.to_dict() if request.form else request.json
+    
+    new_color = ProductColor(
+        product_id=product_id,
+        model_id=data.get('model_id'),
+        name=data['name'],
+        stock_quantity=data.get('stock_quantity', 0),
+        price=data['price'],
+        original_price=data.get('original_price'),
+        threshold=data.get('threshold', 10)
+    )
+    
+    try:
+        db.session.add(new_color)
+        db.session.commit()
+        return jsonify({'message': 'Color added successfully', 'color_id': new_color.color_id}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Update product color
+@products_bp.route('/<int:product_id>/colors/<int:color_id>', methods=['PUT'])
+def update_product_color(product_id, color_id):
+    color = ProductColor.query.get_or_404(color_id)
+    if color.product_id != product_id:
+        return jsonify({'error': 'Color does not belong to this product'}), 400
+        
+    data = request.form.to_dict() if request.form else request.json
+    
+    color.model_id = data.get('model_id', color.model_id)
+    color.name = data.get('name', color.name)
+    color.stock_quantity = data.get('stock_quantity', color.stock_quantity)
+    color.price = data.get('price', color.price)
+    color.original_price = data.get('original_price', color.original_price)
+    color.threshold = data.get('threshold', color.threshold)
+    
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Color updated successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Partially update product color (specifically for stock update)
+@products_bp.route('/<int:product_id>/colors/<int:color_id>', methods=['PATCH'])
+def partially_update_product_color(product_id, color_id):
+    color = ProductColor.query.get_or_404(color_id)
+    if color.product_id != product_id:
+        return jsonify({'error': 'Color does not belong to this product'}), 400
+        
+    data = request.form.to_dict() if request.form else request.json
+    
+    if 'stock_quantity' in data:
+        color.stock_quantity = data['stock_quantity']
+    if 'price' in data:
+        color.price = data['price']
+    if 'original_price' in data:
+        color.original_price = data['original_price']
+    if 'threshold' in data:
+        color.threshold = data['threshold']
+    if 'name' in data:
+        color.name = data['name']
+    if 'model_id' in data:
+        color.model_id = data['model_id']
+    
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Color partially updated successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Delete product color
+@products_bp.route('/<int:product_id>/colors/<int:color_id>', methods=['DELETE'])
+def delete_product_color(product_id, color_id):
+    color = ProductColor.query.get_or_404(color_id)
+    if color.product_id != product_id:
+        return jsonify({'error': 'Color does not belong to this product'}), 400
+    
+    try:
+        db.session.delete(color)
+        db.session.commit()
+        return jsonify({'message': 'Color deleted successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# ----- Product Specifications Routes -----
+
+# Add new product specification
+@products_bp.route('/<int:product_id>/specifications', methods=['POST'])
+def add_product_specification(product_id):
+    product = Product.query.get_or_404(product_id)
+    data = request.form.to_dict() if request.form else request.json
+    
+    new_spec = ModelSpecification(
+        product_id=product_id,
+        key=data['key'],
+        value=data['value']
+    )
+    
+    try:
+        db.session.add(new_spec)
+        db.session.commit()
+        return jsonify({'message': 'Specification added successfully', 'spec_id': new_spec.spec_id}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Update product specification
+@products_bp.route('/<int:product_id>/specifications/<int:spec_id>', methods=['PUT'])
+def update_product_specification(product_id, spec_id):
+    spec = ModelSpecification.query.get_or_404(spec_id)
+    if spec.product_id != product_id:
+        return jsonify({'error': 'Specification does not belong to this product'}), 400
+        
+    data = request.form.to_dict() if request.form else request.json
+    
+    spec.key = data.get('key', spec.key)
+    spec.value = data.get('value', spec.value)
+    
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Specification updated successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Delete product specification
+@products_bp.route('/<int:product_id>/specifications/<int:spec_id>', methods=['DELETE'])
+def delete_product_specification(product_id, spec_id):
+    spec = ModelSpecification.query.get_or_404(spec_id)
+    if spec.product_id != product_id:
+        return jsonify({'error': 'Specification does not belong to this product'}), 400
+    
+    try:
+        db.session.delete(spec)
+        db.session.commit()
+        return jsonify({'message': 'Specification deleted successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# ----- Model Specifications Routes -----
+
+# Add new model specification
+@products_bp.route('/<int:product_id>/models/<int:model_id>/specifications', methods=['POST'])
+def add_model_specification(product_id, model_id):
+    model = ProductModel.query.get_or_404(model_id)
+    if model.product_id != product_id:
+        return jsonify({'error': 'Model does not belong to this product'}), 400
+        
+    data = request.form.to_dict() if request.form else request.json
+    
+    new_spec = ModelSpecification(
+        model_id=model_id,
+        key=data['key'],
+        value=data['value']
+    )
+    
+    try:
+        db.session.add(new_spec)
+        db.session.commit()
+        return jsonify({'message': 'Model specification added successfully', 'spec_id': new_spec.spec_id}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Update model specification
+@products_bp.route('/<int:product_id>/models/<int:model_id>/specifications/<int:spec_id>', methods=['PUT'])
+def update_model_specification(product_id, model_id, spec_id):
+    model = ProductModel.query.get_or_404(model_id)
+    if model.product_id != product_id:
+        return jsonify({'error': 'Model does not belong to this product'}), 400
+        
+    spec = ModelSpecification.query.get_or_404(spec_id)
+    if spec.model_id != model_id:
+        return jsonify({'error': 'Specification does not belong to this model'}), 400
+        
+    data = request.form.to_dict() if request.form else request.json
+    
+    spec.key = data.get('key', spec.key)
+    spec.value = data.get('value', spec.value)
+    
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Model specification updated successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Delete model specification
+@products_bp.route('/<int:product_id>/models/<int:model_id>/specifications/<int:spec_id>', methods=['DELETE'])
+def delete_model_specification(product_id, model_id, spec_id):
+    model = ProductModel.query.get_or_404(model_id)
+    if model.product_id != product_id:
+        return jsonify({'error': 'Model does not belong to this product'}), 400
+        
+    spec = ModelSpecification.query.get_or_404(spec_id)
+    if spec.model_id != model_id:
+        return jsonify({'error': 'Specification does not belong to this model'}), 400
+    
+    try:
+        db.session.delete(spec)
+        db.session.commit()
+        return jsonify({'message': 'Model specification deleted successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# Batch update product rating
+@products_bp.route('/<int:product_id>/rating', methods=['PATCH'])
+def update_product_rating(product_id):
+    product = Product.query.get_or_404(product_id)
+    data = request.form.to_dict() if request.form else request.json
+    
+    if 'rating' in data and 'raters' in data:
+        product.rating = data['rating']
+        product.raters = data['raters']
+    elif 'rating' in data:
+        # If adding a new rating
+        new_rating = float(data['rating'])
+        current_total = product.rating * product.raters
+        product.raters += 1
+        product.rating = (current_total + new_rating) / product.raters
+    
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Product rating updated successfully', 'new_rating': product.rating}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400

@@ -55,7 +55,7 @@ app.config['SECRET_KEY'] = secrets.token_hex(32)
 # Replace your current CORS config with this:
 cors = CORS(app, resources={
     r"/*": {
-        "origins": ["http://localhost:5173", "http://localhost:5174"],
+        "origins": ["http://localhost:5173" ],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
         "supports_credentials": True,
@@ -67,6 +67,11 @@ cors = CORS(app, resources={
 # Configure MySQL database
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:root@localhost/ecom-project'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# NEW 
+# Configure MySQL database
+# app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://mtm_user:Pass%402025%23@103.198.175.81/mtm_store_db'
+# app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Security configurations
 app.config['JWT_SECRET_KEY'] = secrets.token_hex(32)
@@ -94,10 +99,10 @@ def add_security_headers(response):
     response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     
     # CORS headers
-    response.headers["Access-Control-Allow-Origin"] = "http://localhost:5173"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
+    # response.headers["Access-Control-Allow-Origin"] = "http://localhost:5173"
+    # response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    # response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    # response.headers["Access-Control-Allow-Credentials"] = "true"
     
     return response
 
@@ -110,7 +115,7 @@ def unauthorized(error):
 
 
 # ✅ Fix for Home Route
-@app.route('/')
+@app.route('/hello')
 def home():
     return "Hello, World!"
 

@@ -12,6 +12,8 @@ class Customer(UserMixin, db.Model):
     email = db.Column(db.String(255), unique=True)
     password = db.Column(db.String(255))
     role = db.Column(db.String(20), default='customer')
+
+
     
     # Google Auth fields
     google_id = db.Column(db.String(255), unique=True, nullable=True)
