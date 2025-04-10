@@ -396,28 +396,53 @@ def get_wishlist_by_customer_id():
 # ADD BY FRONTEND DEV 
 # CLEAR WISHLIST 
 
-@wishlist_bp.route('/wishlist/clear', methods=['POST'])
+# @wishlist_bp.route('/wishlist/clear', methods=['POST'])
+# @token_required(roles=['customer'])
+# def clear_wishlist():
+#     # Get the customer's wishlist
+#     wishlist = Wishlist.query.filter_by(customer_id=request.current_user.customer_id).first()
+    
+#     if not wishlist:
+#         return jsonify({'error': 'No wishlist found for this user'}), 404
+    
+#     try:
+#         # Delete all items in the wishlist
+#         WishlistItem.query.filter_by(wishlist_id=wishlist.wishlist_id).delete()
+        
+#         # Commit the changes
+#         db.session.commit()
+        
+#         return jsonify({
+#             'success': True,
+#             'message': 'Wishlist cleared successfully',
+#             'wishlist_id': wishlist.wishlist_id
+#         }), 200
+        
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({'error': f'Error clearing wishlist: {str(e)}'}), 500
+
+@wishlist_bp.route('/wishlist/clear', methods=['DELETE'])
 @token_required(roles=['customer'])
 def clear_wishlist():
-    # Get the customer's wishlist
-    wishlist = Wishlist.query.filter_by(customer_id=request.current_user.customer_id).first()
+    customer_id = request.current_user.customer_id
     
+    # Check if the user has a wishlist
+    wishlist = Wishlist.query.filter_by(customer_id=customer_id).first()
     if not wishlist:
-        return jsonify({'error': 'No wishlist found for this user'}), 404
-    
-    try:
-        # Delete all items in the wishlist
-        WishlistItem.query.filter_by(wishlist_id=wishlist.wishlist_id).delete()
-        
-        # Commit the changes
-        db.session.commit()
-        
         return jsonify({
             'success': True,
-            'message': 'Wishlist cleared successfully',
-            'wishlist_id': wishlist.wishlist_id
+            'message': 'No wishlist found for this user'
         }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': f'Error clearing wishlist: {str(e)}'}), 500
+    
+    # Delete all items from the wishlist
+    WishlistItem.query.filter_by(wishlist_id=wishlist.wishlist_id).delete()
+    
+    # Commit the changes
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': 'Wishlist cleared successfully',
+        'wishlist_id': wishlist.wishlist_id
+    }), 200
