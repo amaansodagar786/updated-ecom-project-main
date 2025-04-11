@@ -96,7 +96,7 @@ def add_item_to_wishlist():
     }), 200
 
 
-@wishlist_bp.route('/wishlist/deleteitem', methods=['POST'])
+@wishlist_bp.route('/wishlist/deleteitem', methods=['DELETE'])
 @token_required(roles=['customer'])
 def delete_item_from_wishlist():
     data = request.get_json()
