@@ -24,7 +24,10 @@ def list_products():
         products = Product.query.options(
             db.joinedload(Product.images),
             db.joinedload(Product.main_category),
-            db.joinedload(Product.sub_category)
+            db.joinedload(Product.sub_category),
+            db.joinedload(Product.specifications),  # Add this line
+            db.joinedload(Product.models).joinedload(ProductModel.specifications),
+            db.joinedload(Product.colors).joinedload(ProductColor.images)
         ).all()
         
         products_list = []
@@ -39,6 +42,8 @@ def list_products():
                 'rating': product.rating,
                 'raters': product.raters,
                 'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
+                'specifications': [{'key': s.key, 'value': s.value} for s in product.specifications],
+
             }
             
             # Add models for all product types
@@ -301,15 +306,15 @@ def add_product():
             # Process specifications using ModelSpecification
             specs_count = int(request.form.get('specs_count', 0))
             for i in range(specs_count):
-                spec_key = request.form.get(f'spec_key_{i}')
-                spec_value = request.form.get(f'spec_value_{i}')
-                if spec_key and spec_value:
-                    spec = ModelSpecification(
-                        model_id=default_model.model_id,
-                        key=spec_key,
-                        value=spec_value
-                    )
-                    db.session.add(spec)
+             spec_key = request.form.get(f'spec_key_{i}')
+            spec_value = request.form.get(f'spec_value_{i}')
+            if spec_key and spec_value:
+                spec = ProductSpecification(
+                product_id=new_product.product_id,  # Direct product link
+                key=spec_key,
+                value=spec_value
+            )
+            db.session.add(spec)
             
             # Process colors
             colors_count = int(request.form.get('colors_count', 0))
