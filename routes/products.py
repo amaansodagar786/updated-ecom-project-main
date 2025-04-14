@@ -42,7 +42,10 @@ def list_products():
                 'rating': product.rating,
                 'raters': product.raters,
                 'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
-                'specifications': [{'key': s.key, 'value': s.value} for s in product.specifications],
+                # 'specifications': [{'key': s.key, 'value': s.value} for s in product.specifications],
+                # ADD SPEC ID TO SEND TO THE FRONTEND 
+                'specifications': [{'spec_id': s.spec_id, 'key': s.key, 'value': s.value} for s in product.specifications],
+
 
             }
             
@@ -55,8 +58,10 @@ def list_products():
                     'name': model.name,
                     'description': model.description,
                     'colors': [],
+
+                    # ADD SPEC ID TO SEND TO THE FORNTEND
                     'specifications': [
-                        {'key': spec.key, 'value': spec.value} for spec in model.specifications
+                        {'spec_id': spec.spec_id , 'key': spec.key, 'value': spec.value} for spec in model.specifications
                     ]
                 }
                 
