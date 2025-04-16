@@ -2,6 +2,7 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
 from datetime import timedelta
+
 from extensions import db
 from routes.signup import signup_bp
 from routes.login import login_bp, setup_google_oauth
@@ -12,14 +13,21 @@ from routes.wishlist import wishlist_bp
 from routes.profile import profile_bp
 from routes.state import state_bp
 from routes.address import address_bp
+from routes.offline_customer_routes import offline_customer_bp
 
 
 # Import models
 from models.customer import Customer
 from models.product import Product, ProductImage
-from models.order import OrderHistory, OrderHistoryItem
+# from models.order import OrderHistory, OrderHistoryItem
 from models.cart import Cart, CartItem
 from flask import Flask, jsonify, send_from_directory
+from models.wishlist import Wishlist, WishlistItem
+from models.category import Category, Subcategory
+from models.product import ProductModel, ProductColor, ModelSpecification
+from models.address import Address
+from models.state import State
+from models.hsn import HSN
 
 
 import os
@@ -97,6 +105,7 @@ app.register_blueprint(wishlist_bp)
 app.register_blueprint(profile_bp)
 app.register_blueprint(state_bp)
 app.register_blueprint(address_bp)
+app.register_blueprint(offline_customer_bp)
 
 
 @app.after_request

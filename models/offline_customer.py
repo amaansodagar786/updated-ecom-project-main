@@ -1,26 +1,24 @@
 from flask_login import UserMixin
 from extensions import db
 
-class Customer(UserMixin, db.Model):
-    __tablename__ = 'customer'
+class OfflineCustomer(UserMixin, db.Model):
+    __tablename__ = 'offline_customer'
     
     customer_id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255))
-    mobile = db.Column(db.String(15), unique=True, nullable=True)  # Made nullable for Google users
+    mobile = db.Column(db.String(15), unique=True, nullable=True)
     email = db.Column(db.String(255), unique=True)
-    password = db.Column(db.String(255))
-    role = db.Column(db.String(20), default='customer')
-
     
+    
+    role = db.Column(db.String(20), default='offline_customer')
+
     # Google Auth fields
     google_id = db.Column(db.String(255), unique=True, nullable=True)
-    age = db.Column(db.Integer)
-    gender = db.Column(db.String(20))
     
-    # Relationship with OrderHistory
-    # orders = db.relationship('OrderHistory', backref='customer', lazy=True)
-    orders = db.relationship('Order', back_populates='customer', lazy=True, cascade="all, delete-orphan")
-    addresses = db.relationship('Address', back_populates='customer', lazy=True, cascade="all, delete-orphan")
+    
+    # Relationships
+    orders = db.relationship('Order', back_populates='offline_customer', lazy=True, cascade="all, delete-orphan")
+    addresses = db.relationship('Address', back_populates='offline_customer', lazy=True, cascade="all, delete-orphan")
     
     def get_id(self):
         return str(self.customer_id)
@@ -39,7 +37,5 @@ class Customer(UserMixin, db.Model):
             'email': self.email,
             'role': self.role,
             'google_id': self.google_id,
-            'age':self.age,
-            'gender':self.gender
             
-        }
+        } 
