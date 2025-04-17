@@ -5,6 +5,10 @@ from models.address import Address
 from models.state import State
 import json
 import requests
+from services.pincode_check import is_service_available
+
+
+
 
 address_bp = Blueprint('address', __name__)
 
@@ -37,6 +41,11 @@ def get_address(address_id):
         'address': address.to_dict()
     })
 
+
+
+
+
+
 @address_bp.route('/add-address', methods=['POST'])
 @token_required(roles=['customer'])
 def add_address():
@@ -61,6 +70,11 @@ def add_address():
             'message': 'Invalid state selected'
         }), 400
     
+    # Check if pincode is serviceable
+    service_check = is_service_available(data['pincode'])
+    if not service_check['success']:
+        return jsonify(service_check), 200
+    
     # Handle "Use my current location" if latitude and longitude are provided
     latitude = data.get('latitude')
     longitude = data.get('longitude')
@@ -73,7 +87,7 @@ def add_address():
         locality=data['locality'],
         address_line=data['address_line'],
         city=data['city'],
-        state_id=data['state_id'],  # Changed from state to state_id
+        state_id=data['state_id'],
         landmark=data.get('landmark'),
         alternate_phone=data.get('alternate_phone'),
         address_type=data['address_type'],
@@ -121,6 +135,11 @@ def update_address(address_id):
             'success': False,
             'message': 'Invalid state selected'
         }), 400
+    
+    # Check if pincode is serviceable
+    service_check = is_service_available(data['pincode'])
+    if not service_check['success']:
+        return jsonify(service_check), 200
     
     # Update all fields
     address.name = data['name']
@@ -170,6 +189,11 @@ def partial_update_address(address_id):
                 'success': False,
                 'message': 'Invalid state selected'
             }), 400
+    
+    # Check if pincode is serviceable
+    service_check = is_service_available(data['pincode'])
+    if not service_check['success']:
+        return jsonify(service_check), 200
     
     # Update only provided fields
     for key, value in data.items():

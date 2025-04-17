@@ -6,100 +6,64 @@ from models.address import Address
 from extensions import db
 from flask_login import login_required, current_user
 from middlewares.auth import token_required
-from flask_cors import CORS
-CORS(app, resources={r"/offline-customers": {"origins": "http://localhost:5173"}})
+from services.pincode_check import is_service_available
+
+# from flask_cors import CORS
+# CORS(app, resources={r"/offline-customers": {"origins": "http://localhost:5173"}})
 
 offline_customer_bp = Blueprint('offline_customer', __name__)
 
+# Create
 # Create
 @offline_customer_bp.route('/offline-customers', methods=['POST'])
 @token_required(roles=['admin'])
 def create_offline_customer():
     data = request.get_json()
-    print("Received data:", data)  # Log incoming data
     
-    # Validate required fields
-    if not data.get('name') or not data.get('mobile'):
-        return jsonify({'message': 'Name and mobile are required'}), 400
+    # Create customer
+    new_customer = OfflineCustomer(
+        name=data['name'],
+        mobile=data.get('mobile'),
+        email=data['email'],
+    )
     
-    try:
-        # Create customer
-        new_customer = OfflineCustomer(
-            name=data['name'],
-            mobile=data['mobile'],
-            email=data.get('email', ''),
+    db.session.add(new_customer)
+    db.session.flush()  # Get the customer_id before commit
+    
+    # Add address if provided
+    if 'address' in data:
+        address_data = data['address']
+        new_address = Address(
+            offline_customer_id=new_customer.customer_id,
+            name=address_data['name'],
+            mobile=address_data['mobile'],
+            pincode=address_data['pincode'],
+            locality=address_data['locality'],
+            address_line=address_data['address_line'],
+            city=address_data['city'],
+            state_id=address_data['state_id'],
+            landmark=address_data.get('landmark'),
+            alternate_phone=address_data.get('alternate_phone'),
+            address_type=address_data.get('address_type', 'Home'),
+            latitude=address_data.get('latitude'),
+            longitude=address_data.get('longitude')
         )
-        
-        db.session.add(new_customer)
-        db.session.flush()  # Get the customer_id before commit
-        print("New customer ID:", new_customer.customer_id)  # Log new customer ID
-        
-        # Add address if provided
-        if 'address' in data:
-            address_data = data['address']
-            print("Address data:", address_data)  # Log address data
-            
-            # Validate required address fields
-            required_address_fields = ['name', 'mobile', 'pincode', 'locality', 'address_line', 'city', 'state_id']
-            if not all(field in address_data for field in required_address_fields):
-                missing = [f for f in required_address_fields if f not in address_data]
-                print("Missing address fields:", missing)
-                return jsonify({'message': f'Missing required address fields: {missing}'}), 400
-            
-            new_address = Address(
-                offline_customer_id=new_customer.customer_id,
-                name=address_data['name'],
-                mobile=address_data['mobile'],
-                pincode=address_data['pincode'],
-                locality=address_data['locality'],
-                address_line=address_data['address_line'],
-                city=address_data['city'],
-                state_id=address_data['state_id'],
-                landmark=address_data.get('landmark', ''),
-                alternate_phone=address_data.get('alternate_phone', ''),
-                address_type=address_data.get('address_type', 'Home'),
-                latitude=address_data.get('latitude'),
-                longitude=address_data.get('longitude')
-            )
-            print("Address object:", new_address)  # Log address object
-            db.session.add(new_address)
-        
-        db.session.commit()
-        print("Commit successful")  # Log successful commit
-        
-        # Prepare response
-        customer_dict = {
-            'customer_id': new_customer.customer_id,
-            'name': new_customer.name,
-            'mobile': new_customer.mobile,
-            'email': new_customer.email
-        }
-        
-        if 'address' in data:
-            customer_dict['address'] = {
-                'address_id': new_address.address_id,
-                'name': new_address.name,
-                'mobile': new_address.mobile,
-                'address_line': new_address.address_line,
-                'city': new_address.city,
-                'state_id': new_address.state_id,
-                'pincode': new_address.pincode
-            }
-            customer_dict['addresses'] = [customer_dict['address']]
-        
-        return jsonify(customer_dict), 201
-    
-    except Exception as e:
-        db.session.rollback()
-        print("Error:", str(e))  # Log the full error
-        import traceback
-        traceback.print_exc()  # Print full traceback
-        return jsonify({
-            'message': 'Failed to create customer',
-            'error': str(e),
-            'type': type(e).__name__
-        }), 500
 
+        # Check if pincode is serviceable
+        service_check = is_service_available(address_data['pincode'])
+        if not service_check['success']:
+            return jsonify(service_check), 200
+
+        db.session.add(new_address)
+    
+    db.session.commit()
+    
+    # Get the complete customer data with address
+    customer_dict = new_customer.get_dict()
+    if 'address' in data:
+        customer_dict['address'] = new_address.to_dict()
+    
+    return jsonify(customer_dict), 201
 
 
 # Read (Get all)
