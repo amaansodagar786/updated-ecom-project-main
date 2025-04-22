@@ -150,3 +150,6 @@ class ModelSpecification(db.Model):
     model_id = db.Column(db.Integer, db.ForeignKey('product_models.model_id'), nullable=False)
     key = db.Column(db.String(100), nullable=False)
     value = db.Column(db.String(255), nullable=False)
+
+
+    

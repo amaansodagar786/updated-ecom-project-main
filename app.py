@@ -14,6 +14,8 @@ from routes.profile import profile_bp
 from routes.state import state_bp
 from routes.address import address_bp
 from routes.offline_customer_routes import offline_customer_bp
+# Add this import at the top with other imports
+from routes.forgotpass import forgotpass_bp
 
 
 # Import models
@@ -106,6 +108,8 @@ app.register_blueprint(profile_bp)
 app.register_blueprint(state_bp)
 app.register_blueprint(address_bp)
 app.register_blueprint(offline_customer_bp)
+# Add this with other blueprint registrations
+app.register_blueprint(forgotpass_bp)
 
 
 @app.after_request
