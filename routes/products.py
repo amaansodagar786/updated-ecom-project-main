@@ -13,6 +13,9 @@ from uuid import uuid4
 from middlewares.auth import token_required
 from datetime import datetime
 import json
+from sqlalchemy import func # new added
+from urllib.parse import unquote
+
 
 
 
@@ -185,6 +188,159 @@ def product_detail(product_id):
     except Exception as e:
         logger.error(f"Error getting product details: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+@products_bp.route('/product/slug/<product_slug>', methods=['GET'])
+def get_product_by_slug(product_slug):
+    try:
+        # First try to find by ID if slug is numeric
+        if product_slug.isdigit():
+            product = Product.query.options(
+                db.joinedload(Product.images),
+                db.joinedload(Product.main_category),
+                db.joinedload(Product.sub_category),
+                db.joinedload(Product.hsn),
+                db.joinedload(Product.models).joinedload(ProductModel.colors).joinedload(ProductColor.images),
+                db.joinedload(Product.models).joinedload(ProductModel.specifications),
+                db.joinedload(Product.colors).joinedload(ProductColor.images)
+            ).get(product_slug)
+            if product:
+                # Use the same serialization logic as below instead of to_dict()
+                product_dict = {
+                    'product_id': product.product_id,
+                    'name': product.name,
+                    'description': product.description,
+                    'category': getattr(product.main_category, 'name', None),
+                    'subcategory': getattr(product.sub_category, 'name', None),
+                    'hsn_id': getattr(getattr(product, 'hsn', None), 'hsn_code', None),
+                    'product_type': product.product_type,
+                    'rating': product.rating,
+                    'raters': product.raters,
+                    'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
+                    'specifications': [{'spec_id': s.spec_id, 'key': s.key, 'value': s.value} for s in product.specifications],
+                    'models': [],
+                    'colors': []
+                }
+                
+                # Add models data if exists
+                for model in product.models:
+                    model_dict = {
+                        'model_id': model.model_id,
+                        'name': model.name,
+                        'description': model.description,
+                        'colors': [],
+                        'specifications': [{'spec_id': s.spec_id, 'key': s.key, 'value': s.value} for s in model.specifications]
+                    }
+                    
+                    for color in model.colors:
+                        color_dict = {
+                            'color_id': color.color_id,
+                            'name': color.name,
+                            'stock_quantity': color.stock_quantity,
+                            'price': float(color.price),
+                            'original_price': float(color.original_price) if color.original_price else None,
+                            'threshold': color.threshold,
+                            'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
+                        }
+                        model_dict['colors'].append(color_dict)
+                    
+                    product_dict['models'].append(model_dict)
+                
+                # Add colors for single product type
+                if product.product_type == 'single':
+                    for color in product.colors:
+                        color_dict = {
+                            'color_id': color.color_id,
+                            'name': color.name,
+                            'stock_quantity': color.stock_quantity,
+                            'price': float(color.price),
+                            'original_price': float(color.original_price) if color.original_price else None,
+                            'threshold': color.threshold,
+                            'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
+                        }
+                        product_dict['colors'].append(color_dict)
+                
+                return jsonify(product_dict)
+        
+        # Otherwise search by name (with hyphens replaced by spaces)
+        # name = product_slug.replace('-', ' ')
+        name = unquote(product_slug).replace('-', ' ')
+        product = Product.query.options(
+            db.joinedload(Product.images),
+            db.joinedload(Product.main_category),
+            db.joinedload(Product.sub_category),
+            db.joinedload(Product.hsn),
+            db.joinedload(Product.models).joinedload(ProductModel.colors).joinedload(ProductColor.images),
+            db.joinedload(Product.models).joinedload(ProductModel.specifications),
+            db.joinedload(Product.colors).joinedload(ProductColor.images)
+        ).filter(
+            func.replace(Product.name, '-', ' ').ilike(f'%{name}%')
+        ).first()
+        
+        if not product:
+            return jsonify({'error': 'Product not found'}), 404
+        
+        # Use the same serialization logic as your product_detail endpoint
+        product_dict = {
+            'product_id': product.product_id,
+            'name': product.name,
+            'description': product.description,
+            'category': getattr(product.main_category, 'name', None),
+            'subcategory': getattr(product.sub_category, 'name', None),
+            'hsn_id': getattr(getattr(product, 'hsn', None), 'hsn_code', None),
+            'product_type': product.product_type,
+            'rating': product.rating,
+            'raters': product.raters,
+            'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
+            'specifications': [{'spec_id': s.spec_id, 'key': s.key, 'value': s.value} for s in product.specifications],
+            'models': [],
+            'colors': []
+        }
+        
+        # Add models data if exists
+        for model in product.models:
+            model_dict = {
+                'model_id': model.model_id,
+                'name': model.name,
+                'description': model.description,
+                'colors': [],
+                'specifications': [{'spec_id': s.spec_id, 'key': s.key, 'value': s.value} for s in model.specifications]
+            }
+            
+            for color in model.colors:
+                color_dict = {
+                    'color_id': color.color_id,
+                    'name': color.name,
+                    'stock_quantity': color.stock_quantity,
+                    'price': float(color.price),
+                    'original_price': float(color.original_price) if color.original_price else None,
+                    'threshold': color.threshold,
+                    'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
+                }
+                model_dict['colors'].append(color_dict)
+            
+            product_dict['models'].append(model_dict)
+        
+        # Add colors for single product type
+        if product.product_type == 'single':
+            for color in product.colors:
+                color_dict = {
+                    'color_id': color.color_id,
+                    'name': color.name,
+                    'stock_quantity': color.stock_quantity,
+                    'price': float(color.price),
+                    'original_price': float(color.original_price) if color.original_price else None,
+                    'threshold': color.threshold,
+                    'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
+                }
+                product_dict['colors'].append(color_dict)
+        
+        return jsonify(product_dict)
+        
+    except Exception as e:
+        logger.error(f"Error getting product by slug {product_slug}: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+    
 
 # Routes for categories
 @products_bp.route('/categories', methods=['GET'])
@@ -541,8 +697,12 @@ def add_category():
         if not name:
             return jsonify({'message': 'Category name is required'}), 400
 
+        # Case-insensitive check
+        existing_category = Category.query.filter(func.lower(Category.name) == name.lower()).first()
+        if existing_category:
+            return jsonify({'message': 'Category name already exists'}), 400
+
         image_url = save_image(image)
-        
 
         new_category = Category(name=name, image_url=image_url)
         db.session.add(new_category)
@@ -561,6 +721,7 @@ def add_category():
         return jsonify({'message': 'An error occurred while adding the category'}), 500
 
 
+
 # Add subcategory endpoint
 @products_bp.route('/subcategory/add', methods=['POST'])
 @token_required(roles=['admin'])
@@ -575,11 +736,19 @@ def add_subcategory():
         category = Category.query.get(category_id)
         if not category:
             return jsonify({'message': 'Category not found'}), 404
-        
+
+        # Case-insensitive duplicate check for subcategory within the same category
+        existing_subcategory = Subcategory.query.filter(
+            func.lower(Subcategory.name) == name.lower(),
+            Subcategory.category_id == category_id
+        ).first()
+        if existing_subcategory:
+            return jsonify({'message': 'Subcategory name already exists in this category'}), 400
+
         new_subcategory = Subcategory(name=name, category_id=category_id)
         db.session.add(new_subcategory)
         db.session.commit()
-        
+
         return jsonify({
             'message': 'Subcategory added successfully!',
             'subcategory_id': new_subcategory.subcategory_id,
@@ -591,7 +760,6 @@ def add_subcategory():
         db.session.rollback()
         logger.error(f"Error adding subcategory: {str(e)}")
         return jsonify({'message': 'An error occurred while adding the subcategory'}), 500
-    
 
 @products_bp.route('/products/by-category/<int:category_id>', methods=['GET'])
 def get_products_by_category(category_id):
@@ -720,6 +888,58 @@ def delete_product(product_id):
 
 
 # ----- Product Images Routes -----
+# UPDATE COVER IMAGE 
+
+# Update cover image (special case of updating the first image)
+@products_bp.route('/<int:product_id>/cover-image', methods=['POST'])
+def update_cover_image(product_id):
+    # Get the first image for this product (lowest image_id)
+    first_image = ProductImage.query.filter_by(product_id=product_id)\
+                                  .order_by(ProductImage.image_id.asc())\
+                                  .first()
+    
+    if not first_image:
+        return jsonify({'error': 'No images found for this product'}), 404
+    
+    # Check if image file is provided
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image file provided'}), 400
+    
+    image_file = request.files['image']
+    new_image_url = save_image(image_file)
+    
+    if not new_image_url:
+        return jsonify({'error': 'Invalid image file'}), 400
+    
+    # Store old path for cleanup
+    old_image_path = None
+    if first_image.image_url and not first_image.image_url.startswith('http'):
+        old_image_path = first_image.image_url.replace('/product_images/', '')
+    
+    # Update the image URL
+    first_image.image_url = new_image_url
+    
+    try:
+        db.session.commit()
+        
+        # Delete old image file if replaced
+        if old_image_path and new_image_url != f'/product_images/{old_image_path}':
+            try:
+                file_path = os.path.join(UPLOAD_FOLDER, old_image_path)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                print(f"Error deleting file {old_image_path}: {str(e)}")
+        
+        return jsonify({
+            'message': 'Cover image updated successfully',
+            'image_id': first_image.image_id,
+            'image_url': new_image_url
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+    
 
 # Add new product image
 @products_bp.route('/<int:product_id>/images', methods=['POST'])
@@ -759,34 +979,6 @@ def add_product_image(product_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
 
-
-
-# @products_bp.route('/<int:product_id>/images', methods=['POST'])
-# def add_product_image(product_id):
-#     # Verify product exists
-#     product = Product.query.get_or_404(product_id)
-    
-#     # Handle file upload
-#     if 'image' in request.files:
-#         image_file = request.files['image']
-#         image_url = save_image(image_file)
-        
-#         if image_url:
-#             new_image = ProductImage(
-#                 product_id=product_id,
-#                 image_url=image_url,
-#                 color_id=None  # Explicitly set to None for product images
-#             )
-#             db.session.add(new_image)
-#             db.session.commit()
-            
-#             return jsonify({
-#                 'message': 'Image uploaded successfully',
-#                 'image_url': image_url,
-#                 'image_id': new_image.id
-#             }), 201
-    
-#     return jsonify({'error': 'No image file provided'}), 400
 
 # Update product image
 @products_bp.route('/<int:product_id>/images/<int:image_id>', methods=['PUT'])
@@ -1182,10 +1374,12 @@ def get_product_status():
     for product in products:
         for model in product.models:
             for color in model.colors:
-                images = ProductImage.query.filter_by(
-                    product_id=product.product_id,
-                    color_id=color.color_id
-                ).all()
+                # images = ProductImage.query.filter_by(
+                #     product_id=product.product_id,
+                #     color_id=color.color_id
+                # ).all()
+                images = ProductImage.query.filter_by(product_id=product.product_id).all()
+
                 image_urls = [img.image_url for img in images]
 
                 # This needs to be inside the color loop
@@ -1211,6 +1405,42 @@ def get_product_status():
                 })
                 
     return jsonify(results), 200
+
+
+# @products_bp.route('/product/get/productstatus', methods=['GET'])
+# @token_required(roles=['admin'])
+# def get_product_status():
+#     results = []
+
+#     products = Product.query.all()
+
+#     for product in products:
+#         # Get ALL images for this product (regardless of color)
+#         images = ProductImage.query.filter_by(product_id=product.product_id).all()
+#         image_urls = [img.image_url for img in images]
+
+#         for model in product.models:
+#             for color in model.colors:
+#                 status = 'IN_STOCK'
+#                 if color.stock_quantity <= color.threshold:
+#                     status = 'LOW_STOCK'
+#                 if color.stock_quantity == 0:
+#                     status = 'OUT_OF_STOCK'
+                
+#                 results.append({
+#                     "product_id": product.product_id,
+#                     "product_name": product.name,
+#                     "model_id": model.model_id,
+#                     "model_name": model.name,
+#                     "color_id": color.color_id,
+#                     "color_name": color.name,
+#                     "images": image_urls,  # Same images for all colors of this product
+#                     "stock_quantity": color.stock_quantity,
+#                     "threshold": color.threshold,
+#                     "status": status
+#                 })
+                
+#     return jsonify(results), 200
 
         
 # CATEGORY AND SUBCATEGORY UPDATE 
@@ -1356,65 +1586,150 @@ def update_product_categorization(product_id):
         return jsonify({'error': str(e)}), 500
 
 
+# Update product HSN code
+@products_bp.route('/update/<int:product_id>/hsn', methods=['PUT'])
+@token_required(roles=['admin'])
+def update_product_hsn(product_id):
+    try:
+        product = Product.query.get_or_404(product_id)
+        data = request.json
+        
+        hsn_id = data.get('hsn_id')
+        if not hsn_id:
+            return jsonify({'error': 'HSN ID is required'}), 400
+            
+        # Verify the HSN exists
+        hsn = HSN.query.get(hsn_id)
+        if not hsn:
+            return jsonify({'error': 'HSN code not found'}), 404
+            
+        # Update the HSN
+        product.hsn_id = hsn_id
+        product.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        logger.info(f"Product HSN updated by admin: {request.current_user.email} - Product ID: {product_id}")
+        
+        return jsonify({
+            'message': 'Product HSN updated successfully',
+            'product_id': product.product_id,
+            'hsn_id': product.hsn_id,
+            'hsn_code': hsn.hsn_code,
+            'hsn_description': hsn.hsn_description
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating product HSN: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Edit existing HSN entry
+@products_bp.route('/edit/hsn/<int:hsn_id>', methods=['PUT'])
+# @products_bp.route('/edit/hsn/<int:hsn_id>', methods=['POST'])
+@token_required(roles=['admin'])
+def edit_hsn(hsn_id):
+    try:
+        hsn = HSN.query.get_or_404(hsn_id)
+        data = request.get_json()
+        
+        hsn_code = data.get('hsn_code')
+        description = data.get('description')
+        gst_rate = data.get('gst_rate')
+        
+        if not hsn_code or not description:
+            return jsonify({'message': 'HSN code and description are required'}), 400
+
+        # Check if the new HSN code already exists (excluding current record)
+        existing_hsn = HSN.query.filter(
+            HSN.hsn_code == hsn_code,
+            HSN.hsn_id != hsn_id
+        ).first()
+        
+        if existing_hsn:
+            return jsonify({'message': 'HSN code already exists'}), 400
+
+        # Update the HSN record
+        hsn.hsn_code = hsn_code
+        hsn.hsn_description = description
+        hsn.gst_rate = gst_rate
+        
+        db.session.commit()
+        
+        logger.info(f"HSN code updated by admin: {request.current_user.email} - HSN ID: {hsn_id}")
+        
+        return jsonify({
+            'message': 'HSN updated successfully!',
+            'hsn_id': hsn.hsn_id,
+            'hsn_code': hsn.hsn_code,
+            'description': hsn.hsn_description,
+            'gst_rate': hsn.gst_rate
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating HSN: {str(e)}")
+        return jsonify({'message': 'An error occurred while updating the HSN'}), 500
+
 # EDIT CATEGORY AND SUBCATEGORY
 
 #  CATEGORY 
-# @products_bp.route('/category/<int:category_id>', methods=['PUT'])
-# @token_required(roles=['admin'])
-# def update_category(category_id):
-#     try:
-#         data = request.json
-#         category = Category.query.get_or_404(category_id)
+@products_bp.route('/category/<int:category_id>', methods=['PUT'])
+@token_required(roles=['admin'])
+def update_category(category_id):
+    try:
+        data = request.json
+        category = Category.query.get_or_404(category_id)
 
-#         name = data.get('name')
-#         image_url = data.get('image_url')
+        name = data.get('name')
+        image_url = data.get('image_url')
 
-#         if name:
-#             category.name = name
-#         if image_url:
-#             category.image_url = image_url
+        if name:
+            category.name = name
+        if image_url:
+            category.image_url = image_url
 
-#         db.session.commit()
-#         logger.info(f"Category updated by admin: {request.current_user.email} - Category ID: {category_id}")
+        db.session.commit()
+        logger.info(f"Category updated by admin: {request.current_user.email} - Category ID: {category_id}")
 
-#         return jsonify({
-#             'message': 'Category updated successfully',
-#             'category_id': category.category_id,
-#             'name': category.name,
-#             'image_url': category.image_url
-#         }), 200
+        return jsonify({
+            'message': 'Category updated successfully',
+            'category_id': category.category_id,
+            'name': category.name,
+            'image_url': category.image_url
+        }), 200
 
-#     except Exception as e:
-#         db.session.rollback()
-#         logger.error(f"Error updating category: {str(e)}")
-#         return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating category: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-# # SUBCATEGORY 
 
-# @products_bp.route('/subcategory/<int:subcategory_id>', methods=['PUT'])
-# @token_required(roles=['admin'])
-# def update_subcategory(subcategory_id):
-#     try:
-#         data = request.json
-#         subcategory = Subcategory.query.get_or_404(subcategory_id)
+ # SUBCATEGORY 
 
-#         name = data.get('name')
-#         if name:
-#             subcategory.name = name
+@products_bp.route('/subcategory/<int:subcategory_id>', methods=['PUT'])
+@token_required(roles=['admin'])
+def update_subcategory(subcategory_id):
+    try:
+        data = request.json
+        subcategory = Subcategory.query.get_or_404(subcategory_id)
 
-#         db.session.commit()
-#         logger.info(f"Subcategory updated by admin: {request.current_user.email} - Subcategory ID: {subcategory_id}")
+        name = data.get('name')
+        if name:
+            subcategory.name = name
 
-#         return jsonify({
-#             'message': 'Subcategory updated successfully',
-#             'subcategory_id': subcategory.subcategory_id,
-#             'name': subcategory.name
-#         }), 200
+        db.session.commit()
+        logger.info(f"Subcategory updated by admin: {request.current_user.email} - Subcategory ID: {subcategory_id}")
 
-#     except Exception as e:
-#         db.session.rollback()
-#         logger.error(f"Error updating subcategory: {str(e)}")
-#         return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'message': 'Subcategory updated successfully',
+            'subcategory_id': subcategory.subcategory_id,
+            'name': subcategory.name
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating subcategory: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 
 # DELETE Category AND SUBCATEGORY 
@@ -1422,47 +1737,73 @@ def update_product_categorization(product_id):
 
 # Delete a category
 
-# @products_bp.route('/delete/category/<int:category_id>', methods=['DELETE'])
-# @token_required(roles=['admin'])
-# def delete_category(category_id):
-#     try:
-#         category = Category.query.get_or_404(category_id)
+@products_bp.route('/delete/category/<int:category_id>', methods=['DELETE'])
+@token_required(roles=['admin'])
+def delete_category(category_id):
+    try:
+        category = Category.query.get_or_404(category_id)
 
-#         # Check if any product is using this category
-#         product_using_category = Product.query.filter_by(category_id=category_id).first()
-#         if product_using_category:
-#             return jsonify({'error': 'Cannot delete. Category is assigned to one or more products.'}), 400
+        # Check if any product is using this category
+        product_using_category = Product.query.filter_by(category_id=category_id).first()
+        if product_using_category:
+            return jsonify({'error': 'Cannot delete. Category is assigned to one or more products.'}), 400
 
-#         db.session.delete(category)
-#         db.session.commit()
-#         logger.info(f"Category deleted by admin: {request.current_user.email} - Category ID: {category_id}")
-#         return jsonify({'message': 'Category deleted successfully'}), 200
+        db.session.delete(category)
+        db.session.commit()
+        logger.info(f"Category deleted by admin: {request.current_user.email} - Category ID: {category_id}")
+        return jsonify({'message': 'Category deleted successfully'}), 200
 
-#     except Exception as e:
-#         db.session.rollback()
-#         logger.error(f"Error deleting category: {str(e)}")
-#         return jsonify({'error': 'Internal server error'}), 500
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error deleting category: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 
-# # Delete a subcategory
+ # Delete a subcategory
 
-# @products_bp.route('/delete/category/<int:category_id>', methods=['DELETE'])
-# @token_required(roles=['admin'])
-# def delete_category(category_id):
-#     try:
-#         category = Category.query.get_or_404(category_id)
+@products_bp.route('/delete/subcategory/<int:subcategory_id>', methods=['DELETE'])
+@token_required(roles=['admin'])
+def delete_subcategory(subcategory_id):
+    try:
+        subcategory = Subcategory.query.get_or_404(subcategory_id)
 
-#         # Check if any product is using this category
-#         product_using_category = Product.query.filter_by(category_id=category_id).first()
-#         if product_using_category:
-#             return jsonify({'error': 'Cannot delete. Category is assigned to one or more products.'}), 400
+        # Check if any product is using this subcategory
+        product_using_subcategory = Product.query.filter_by(subcategory_id=subcategory_id).first()
+        if product_using_subcategory:
+            return jsonify({'error': 'Cannot delete. Subcategory is assigned to one or more products.'}), 400
 
-#         db.session.delete(category)
-#         db.session.commit()
-#         logger.info(f"Category deleted by admin: {request.current_user.email} - Category ID: {category_id}")
-#         return jsonify({'message': 'Category deleted successfully'}), 200
+        db.session.delete(subcategory)
+        db.session.commit()
+        logger.info(f"Subcategory deleted by admin: {request.current_user.email} - Subcategory ID: {subcategory_id}")
+        return jsonify({'message': 'Subcategory deleted successfully'}), 200
 
-#     except Exception as e:
-#         db.session.rollback()
-#         logger.error(f"Error deleting category: {str(e)}")
-#         return jsonify({'error': 'Internal server error'}), 500
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error deleting subcategory: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+    
+
+
+
+# Delete HSN code
+@products_bp.route('/delete/hsn/<int:hsn_id>', methods=['DELETE'])
+@token_required(roles=['admin'])
+def delete_hsn(hsn_id):
+    try:
+        hsn = HSN.query.get_or_404(hsn_id)
+
+        # Check if any product is using this HSN
+        product_using_hsn = Product.query.filter_by(hsn_id=hsn_id).first()
+        if product_using_hsn:
+            return jsonify({'error': 'Cannot delete. HSN code is assigned to one or more products.'}), 400
+
+        db.session.delete(hsn)
+        db.session.commit()
+        
+        logger.info(f"HSN code deleted by admin: {request.current_user.email} - HSN ID: {hsn_id}")
+        return jsonify({'message': 'HSN code deleted successfully'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error deleting HSN code: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500

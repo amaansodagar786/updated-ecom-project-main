@@ -140,6 +140,22 @@ def unauthorized(error):
 def home():
     return "Hello, World!"
 
+FRONTEND_DIST = os.path.abspath('frontend/dist')
+  # ← Path to React build files
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_frontend(path):
+    # If the path is an API call, handle it
+    if path.startswith('api/'):
+        return jsonify({'error': 'Not found'}), 404
+
+    # Check if the file exists in frontend/dist (e.g., CSS/JS/images)
+    if os.path.exists(os.path.join(FRONTEND_DIST, path)):
+        return send_from_directory(FRONTEND_DIST, path)
+
+    # Otherwise, send index.html (React handles the rest)
+    return send_from_directory(FRONTEND_DIST, 'index.html')
 
 if __name__ == '__main__':
     # Ensure database tables are created
