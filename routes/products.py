@@ -419,6 +419,230 @@ def save_image(image_file):
 
 
 
+# @products_bp.route('/product/add', methods=['POST'])
+# @token_required(roles=['admin'])
+# def add_product():
+#     # Ensure upload directory exists
+#     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+#     try:
+#         # Extract basic product information
+#         name = request.form.get('name')
+#         description = request.form.get('description')
+#         product_type = request.form.get('product_type')
+        
+#         # Handle category and subcategory and hsn
+#         category_id = request.form.get('category_id')
+#         subcategory_id = request.form.get('subcategory_id')
+#         hsn_id = request.form.get('hsn_id')
+
+    
+        
+#         # Check if we need to create a new category
+#         if not category_id and request.form.get('new_category'):
+#             new_category = Category(name=request.form.get('new_category'),image_url=save_image(request.files.get('image')))
+#             db.session.add(new_category)
+#             db.session.commit()  # Get the ID without committing
+#             category_id = new_category.category_id
+        
+#         # Check if we need to create a new subcategory
+#         if category_id and not subcategory_id and request.form.get('new_subcategory'):
+#             new_subcategory = Subcategory(
+#                 name=request.form.get('new_subcategory'),
+#                 category_id=category_id
+#             )
+#             db.session.add(new_subcategory)
+#             db.session.commit()  # Get the ID without committing
+#             subcategory_id = new_subcategory.subcategory_id
+
+#             # Check if we need to create a new HSN
+#         # In your /product/add route, fix the HSN creation block:
+#         if not hsn_id and request.form.get('new_hsn_code'):
+#             new_hsn = HSN(
+#               hsn_code=request.form.get('new_hsn_code'),
+#               hsn_description=request.form.get('new_hsn_description', '')
+#             )
+#             db.session.add(new_hsn)
+#             db.session.commit()
+#             hsn_id = new_hsn.hsn_id  # This must be inside the if block
+        
+#         # Validate required fields
+#         print(name, description, category_id, product_type)
+#         if not all([name, description, category_id, product_type]):
+#             return jsonify({'message': 'Missing required product details'}), 400
+        
+#         # Create new product
+#         new_product = Product(
+#             name=name,
+#             description=description,
+#             category_id=category_id,
+#             subcategory_id=subcategory_id,
+#             hsn_id=hsn_id,  # Add this line
+#             product_type=product_type,
+#             rating=0,
+#             raters=0
+#         )
+        
+#         # Add product to session
+#         db.session.add(new_product)
+#         db.session.commit()  # Get the product ID
+        
+#         # Handle product-level images
+#         product_images = request.files.getlist('product_images')
+#         for image_file in product_images:
+#             image_url = save_image(image_file)
+#             if image_url:
+#                 product_image = ProductImage(
+#                     product_id=new_product.product_id,
+#                     image_url=image_url
+#                 )
+#                 db.session.add(product_image)
+        
+#         # Handle Single Product
+#         if product_type == 'single':
+            
+            
+#             # Create default model for single product
+#             default_model = ProductModel(
+#                 product_id=new_product.product_id,
+#                 name=name,
+#                 description=description
+#             )
+#             db.session.add(default_model)
+#             db.session.commit()  # Get the model ID
+            
+#         # Process specifications using ModelSpecification
+#         specs_count = int(request.form.get('specs_count', 0))
+#         for i in range(specs_count):
+#             spec_key = request.form.get(f'spec_key_{i}')
+#             spec_value = request.form.get(f'spec_value_{i}')
+#             if spec_key and spec_value:
+#                 spec = ProductSpecification(
+#                     product_id=new_product.product_id,  # Direct product link
+#                     key=spec_key,
+#                     value=spec_value
+#                 )
+#                 db.session.add(spec)
+            
+#             # Process colors
+#             colors_count = int(request.form.get('colors_count', 0))
+#             for i in range(colors_count):
+#                 color_name = request.form.get(f'color_name_{i}')
+#                 color_price = request.form.get(f'color_price_{i}')
+#                 color_original_price = request.form.get(f'color_original_price_{i}')
+#                 color_stock = request.form.get(f'color_stock_{i}', 0)
+#                 threshold = request.form.get(f'threshold_{i}', 10)
+                
+#                 if color_name and color_price:
+#                     # Create color linked to both product and default model
+#                     color = ProductColor(
+#                         product_id=new_product.product_id,
+#                         model_id=default_model.model_id,
+#                         name=color_name,
+#                         stock_quantity=int(color_stock),
+#                         price=float(color_price),
+#                         original_price=float(color_original_price) if color_original_price else None
+#                         ,threshold=int(threshold)
+                        
+#                     )
+#                     db.session.add(color)
+#                     db.session.commit()  # Get color ID
+                    
+#                     # Process color images
+#                     color_images = request.files.getlist(f'color_images_{i}')
+#                     for image_file in color_images:
+#                         image_url = save_image(image_file)
+#                         if image_url:
+#                             image = ProductImage(
+#                                 product_id=new_product.product_id,
+#                                 color_id=color.color_id,
+#                                 image_url=image_url
+#                             )
+#                             db.session.add(image)
+        
+#         # Handle Variable Product
+#         elif product_type == 'variable':
+#             # Process models
+#             models_count = int(request.form.get('models_count', 0))
+#             for i in range(models_count):
+#                 model_name = request.form.get(f'model_name_{i}')
+#                 model_description = request.form.get(f'model_description_{i}')
+                
+#                 if model_name and model_description:
+#                     # Create model
+#                     model = ProductModel(
+#                         product_id=new_product.product_id,
+#                         name=model_name,
+#                         description=model_description
+#                     )
+#                     db.session.add(model)
+#                     db.session.commit()  # Get model ID
+                    
+#                     # Process model specifications
+#                     model_specs_count = int(request.form.get(f'model_specs_count_{i}', 0))
+#                     for j in range(model_specs_count):
+#                         spec_key = request.form.get(f'model_{i}_spec_key_{j}')
+#                         spec_value = request.form.get(f'model_{i}_spec_value_{j}')
+#                         if spec_key and spec_value:
+#                             spec = ModelSpecification(
+#                                 model_id=model.model_id,
+#                                 key=spec_key,
+#                                 value=spec_value
+#                             )
+#                             db.session.add(spec)
+                    
+#                     # Process model colors
+#                     model_colors_count = int(request.form.get(f'model_colors_count_{i}', 0))
+#                     for j in range(model_colors_count):
+#                         color_name = request.form.get(f'model_{i}_color_name_{j}')
+#                         color_price = request.form.get(f'model_{i}_color_price_{j}')
+#                         color_original_price = request.form.get(f'model_{i}_color_original_price_{j}')
+#                         color_stock = request.form.get(f'model_{i}_color_stock_{j}', 0)
+#                         threshold = request.form.get(f'model_{i}_threshold_{j}', 10)
+#                         if color_name and color_price:
+#                             # Create color
+#                             color = ProductColor(
+#                                 product_id=new_product.product_id,
+#                                 model_id=model.model_id,
+#                                 name=color_name,
+#                                 stock_quantity=int(color_stock),
+#                                 price=float(color_price),
+#                                 original_price=float(color_original_price) if color_original_price else None,
+#                                 threshold=int(threshold)
+#                             )
+#                             db.session.add(color)
+#                             db.session.commit()  # Get color ID
+                            
+#                             # Process color images
+#                             color_images = request.files.getlist(f'model_{i}_color_images_{j}')
+#                             for image_file in color_images:
+#                                 image_url = save_image(image_file)
+#                                 if image_url:
+#                                     image = ProductImage(
+#                                         product_id=new_product.product_id,
+#                                         color_id=color.color_id,
+#                                         image_url=image_url
+#                                     )
+#                                     db.session.add(image)
+        
+#         # Commit all changes
+#         db.session.commit()
+        
+#         logger.info(f"Product added by admin: {request.current_user.email} - Product ID: {new_product.product_id}")
+        
+#         return jsonify({
+#             'message': 'Product added successfully!',
+#             'product_id': new_product.product_id
+#         }), 201
+        
+#     except Exception as e:
+#         db.session.rollback()
+#         logger.error(f"Error adding product by {request.current_user.email}: {str(e)}")
+#         return jsonify({'message': f'An error occurred while adding the product: {str(e)}'}), 500
+
+
+
+# Add a new product
 @products_bp.route('/product/add', methods=['POST'])
 @token_required(roles=['admin'])
 def add_product():
@@ -430,21 +654,22 @@ def add_product():
         name = request.form.get('name')
         description = request.form.get('description')
         product_type = request.form.get('product_type')
-        
-        # Handle category and subcategory and hsn
+
+        # Handle category, subcategory, and hsn
         category_id = request.form.get('category_id')
         subcategory_id = request.form.get('subcategory_id')
         hsn_id = request.form.get('hsn_id')
 
-    
-        
         # Check if we need to create a new category
         if not category_id and request.form.get('new_category'):
-            new_category = Category(name=request.form.get('new_category'),image_url=save_image(request.files.get('image')))
+            new_category = Category(
+                name=request.form.get('new_category'),
+                image_url=save_image(request.files.get('image'))
+            )
             db.session.add(new_category)
-            db.session.commit()  # Get the ID without committing
+            db.session.commit()
             category_id = new_category.category_id
-        
+
         # Check if we need to create a new subcategory
         if category_id and not subcategory_id and request.form.get('new_subcategory'):
             new_subcategory = Subcategory(
@@ -452,41 +677,38 @@ def add_product():
                 category_id=category_id
             )
             db.session.add(new_subcategory)
-            db.session.commit()  # Get the ID without committing
+            db.session.commit()
             subcategory_id = new_subcategory.subcategory_id
 
-            # Check if we need to create a new HSN
-        # In your /product/add route, fix the HSN creation block:
+        # Check if we need to create a new HSN
         if not hsn_id and request.form.get('new_hsn_code'):
             new_hsn = HSN(
-              hsn_code=request.form.get('new_hsn_code'),
-              hsn_description=request.form.get('new_hsn_description', '')
+                hsn_code=request.form.get('new_hsn_code'),
+                hsn_description=request.form.get('new_hsn_description', '')
             )
             db.session.add(new_hsn)
             db.session.commit()
-            hsn_id = new_hsn.hsn_id  # This must be inside the if block
-        
+            hsn_id = new_hsn.hsn_id
+
         # Validate required fields
         print(name, description, category_id, product_type)
         if not all([name, description, category_id, product_type]):
             return jsonify({'message': 'Missing required product details'}), 400
-        
+
         # Create new product
         new_product = Product(
             name=name,
             description=description,
             category_id=category_id,
             subcategory_id=subcategory_id,
-            hsn_id=hsn_id,  # Add this line
+            hsn_id=hsn_id,
             product_type=product_type,
             rating=0,
             raters=0
         )
-        
-        # Add product to session
         db.session.add(new_product)
-        db.session.commit()  # Get the product ID
-        
+        db.session.commit()
+
         # Handle product-level images
         product_images = request.files.getlist('product_images')
         for image_file in product_images:
@@ -497,11 +719,9 @@ def add_product():
                     image_url=image_url
                 )
                 db.session.add(product_image)
-        
+
         # Handle Single Product
         if product_type == 'single':
-            
-            
             # Create default model for single product
             default_model = ProductModel(
                 product_id=new_product.product_id,
@@ -509,21 +729,21 @@ def add_product():
                 description=description
             )
             db.session.add(default_model)
-            db.session.commit()  # Get the model ID
-            
-            # Process specifications using ModelSpecification
+            db.session.commit()
+
+            # Process specifications
             specs_count = int(request.form.get('specs_count', 0))
             for i in range(specs_count):
-             spec_key = request.form.get(f'spec_key_{i}')
-            spec_value = request.form.get(f'spec_value_{i}')
-            if spec_key and spec_value:
-                spec = ProductSpecification(
-                product_id=new_product.product_id,  # Direct product link
-                key=spec_key,
-                value=spec_value
-            )
-            db.session.add(spec)
-            
+                spec_key = request.form.get(f'spec_key_{i}')
+                spec_value = request.form.get(f'spec_value_{i}')
+                if spec_key and spec_value:
+                    spec = ProductSpecification(
+                        product_id=new_product.product_id,
+                        key=spec_key,
+                        value=spec_value
+                    )
+                    db.session.add(spec)
+
             # Process colors
             colors_count = int(request.form.get('colors_count', 0))
             for i in range(colors_count):
@@ -532,22 +752,20 @@ def add_product():
                 color_original_price = request.form.get(f'color_original_price_{i}')
                 color_stock = request.form.get(f'color_stock_{i}', 0)
                 threshold = request.form.get(f'threshold_{i}', 10)
-                
+
                 if color_name and color_price:
-                    # Create color linked to both product and default model
                     color = ProductColor(
                         product_id=new_product.product_id,
                         model_id=default_model.model_id,
                         name=color_name,
                         stock_quantity=int(color_stock),
                         price=float(color_price),
-                        original_price=float(color_original_price) if color_original_price else None
-                        ,threshold=int(threshold)
-                        
+                        original_price=float(color_original_price) if color_original_price else None,
+                        threshold=int(threshold)
                     )
                     db.session.add(color)
-                    db.session.commit()  # Get color ID
-                    
+                    db.session.commit()
+
                     # Process color images
                     color_images = request.files.getlist(f'color_images_{i}')
                     for image_file in color_images:
@@ -559,25 +777,23 @@ def add_product():
                                 image_url=image_url
                             )
                             db.session.add(image)
-        
+
         # Handle Variable Product
         elif product_type == 'variable':
-            # Process models
             models_count = int(request.form.get('models_count', 0))
             for i in range(models_count):
                 model_name = request.form.get(f'model_name_{i}')
                 model_description = request.form.get(f'model_description_{i}')
-                
+
                 if model_name and model_description:
-                    # Create model
                     model = ProductModel(
                         product_id=new_product.product_id,
                         name=model_name,
                         description=model_description
                     )
                     db.session.add(model)
-                    db.session.commit()  # Get model ID
-                    
+                    db.session.commit()
+
                     # Process model specifications
                     model_specs_count = int(request.form.get(f'model_specs_count_{i}', 0))
                     for j in range(model_specs_count):
@@ -590,7 +806,7 @@ def add_product():
                                 value=spec_value
                             )
                             db.session.add(spec)
-                    
+
                     # Process model colors
                     model_colors_count = int(request.form.get(f'model_colors_count_{i}', 0))
                     for j in range(model_colors_count):
@@ -599,8 +815,8 @@ def add_product():
                         color_original_price = request.form.get(f'model_{i}_color_original_price_{j}')
                         color_stock = request.form.get(f'model_{i}_color_stock_{j}', 0)
                         threshold = request.form.get(f'model_{i}_threshold_{j}', 10)
+
                         if color_name and color_price:
-                            # Create color
                             color = ProductColor(
                                 product_id=new_product.product_id,
                                 model_id=model.model_id,
@@ -611,8 +827,8 @@ def add_product():
                                 threshold=int(threshold)
                             )
                             db.session.add(color)
-                            db.session.commit()  # Get color ID
-                            
+                            db.session.commit()
+
                             # Process color images
                             color_images = request.files.getlist(f'model_{i}_color_images_{j}')
                             for image_file in color_images:
@@ -624,23 +840,21 @@ def add_product():
                                         image_url=image_url
                                     )
                                     db.session.add(image)
-        
+
         # Commit all changes
         db.session.commit()
-        
+
         logger.info(f"Product added by admin: {request.current_user.email} - Product ID: {new_product.product_id}")
-        
+
         return jsonify({
             'message': 'Product added successfully!',
             'product_id': new_product.product_id
         }), 201
-        
+
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error adding product by {request.current_user.email}: {str(e)}")
         return jsonify({'message': f'An error occurred while adding the product: {str(e)}'}), 500
-
-
 
 
 # ADD HSN 
@@ -784,6 +998,7 @@ def get_products_by_category(category_id):
                 'color_id': color.color_id,
                 'name': color.name,
                 'price': float(color.price),
+                'original_price': float(color.original_price),
                 'stock_quantity': color.stock_quantity
             } for color in product.colors],
             'specifications': [{

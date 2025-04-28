@@ -17,6 +17,10 @@ from routes.offline_customer_routes import offline_customer_bp
 # Add this import at the top with other imports
 from routes.forgotpass import forgotpass_bp
 
+from apscheduler.schedulers.background import BackgroundScheduler
+from services.stock_notifier import check_and_notify  # Import from services folder
+
+
 
 # Import models
 from models.customer import Customer
@@ -161,9 +165,12 @@ if __name__ == '__main__':
     # Ensure database tables are created
     with app.app_context():
         db.create_all()
+
+         # Setup Scheduler
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(func=check_and_notify, trigger="interval", minutes=400)
+        scheduler.start()
+        print("📅 Background Scheduler Started (Every 4 minutes)")
     
-
-
-
     # Run the app
     app.run(debug=True)
