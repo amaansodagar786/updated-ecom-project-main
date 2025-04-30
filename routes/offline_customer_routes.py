@@ -79,6 +79,9 @@ def get_offline_customers():
         result.append(customer_data)
     return jsonify(result)
 
+
+
+
 # Read (Get one)
 @offline_customer_bp.route('/offline-customers/<int:customer_id>', methods=['GET'])
 @token_required(roles=['admin'])

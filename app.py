@@ -16,6 +16,7 @@ from routes.address import address_bp
 from routes.offline_customer_routes import offline_customer_bp
 # Add this import at the top with other imports
 from routes.forgotpass import forgotpass_bp
+from routes.deviceinfo import device_transaction_bp
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from services.stock_notifier import check_and_notify  # Import from services folder
@@ -114,6 +115,7 @@ app.register_blueprint(address_bp)
 app.register_blueprint(offline_customer_bp)
 # Add this with other blueprint registrations
 app.register_blueprint(forgotpass_bp)
+app.register_blueprint(device_transaction_bp)
 
 
 @app.after_request
@@ -144,23 +146,7 @@ def unauthorized(error):
 def home():
     return "Hello, World!"
 
-FRONTEND_DIST = os.path.abspath('frontend/dist')
-  # ← Path to React build files
-
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_frontend(path):
-    # If the path is an API call, handle it
-    if path.startswith('api/'):
-        return jsonify({'error': 'Not found'}), 404
-
-    # Check if the file exists in frontend/dist (e.g., CSS/JS/images)
-    if os.path.exists(os.path.join(FRONTEND_DIST, path)):
-        return send_from_directory(FRONTEND_DIST, path)
-
-    # Otherwise, send index.html (React handles the rest)
-    return send_from_directory(FRONTEND_DIST, 'index.html')
-
+3
 if __name__ == '__main__':
     # Ensure database tables are created
     with app.app_context():
@@ -170,7 +156,7 @@ if __name__ == '__main__':
         scheduler = BackgroundScheduler()
         scheduler.add_job(func=check_and_notify, trigger="interval", minutes=400)
         scheduler.start()
-        print("📅 Background Scheduler Started (Every 4 minutes)")
+        print("📅 Background Scheduler Started (Every 400 minutes)")
     
     # Run the app
     app.run(debug=True)

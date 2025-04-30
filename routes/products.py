@@ -1375,8 +1375,9 @@ def update_product_color(product_id, color_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
 
+
 # Partially update product color (specifically for stock update)
-@products_bp.route('/<int:product_id>/colors/<int:color_id>', methods=['PATCH'])
+@products_bp.route('/<int:product_id>/colors/<int:color_id>', methods=['PUT'])
 def partially_update_product_color(product_id, color_id):
     color = ProductColor.query.get_or_404(color_id)
     if color.product_id != product_id:

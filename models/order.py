@@ -53,3 +53,18 @@ class OrderItem(db.Model):
     order = db.relationship('Order', back_populates='items')
     model = db.relationship('ProductModel', backref='order_items')
     color = db.relationship('ProductColor', backref='order_items')
+
+
+class OrderDetail(db.Model):
+    __tablename__ = 'order_details'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey('order_items.item_id', ondelete='CASCADE'), nullable=False)
+    sr_no = db.Column(db.Integer, nullable=True)
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.order_id', ondelete='CASCADE'), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.product_id', ondelete='CASCADE'), nullable=False)
+    
+    # Relationships
+    item = db.relationship('OrderItem', backref='details')
+    order = db.relationship('Order', backref='details')
+    product = db.relationship('Product', backref='order_details')

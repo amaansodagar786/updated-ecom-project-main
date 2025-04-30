@@ -482,6 +482,9 @@ def get_orders():
         } for item in order.items]
     } for order in orders])
 
+
+
+
 @order_bp.route('/orders', methods=['POST'])
 @token_required(roles=['admin'])
 def create_order():
@@ -731,3 +734,51 @@ def place_order():
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': f'Error creating order: {str(e)}'}), 500
+
+
+
+
+@order_bp.route('/orders/<int:order_id>/items-expanded', methods=['GET'])
+def get_order_items_expanded(order_id):
+    try:
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({'error': 'Order not found'}), 404
+        
+        expanded_items = []
+        for item in order.items:
+            # Safely access related objects
+            product_name = item.product.name if item.product and hasattr(item, 'product') else None
+            model_name = item.model.name if item.model and hasattr(item, 'model') else None
+            color_name = item.color.name if item.color and hasattr(item, 'color') else None
+            
+            for _ in range(item.quantity):
+                expanded_items.append({
+                    'item_id': item.item_id,
+                    'product_id': item.product_id,
+                    'model_id': item.model_id,
+                    'color_id': item.color_id,
+                    'unit_price': float(item.unit_price),
+                    'total_price': float(item.unit_price),
+                    'product_name': product_name,
+                    'model_name': model_name,
+                    'color_name': color_name,
+                    'status': getattr(item, 'status', None)  # Safely get status if it exists
+                })
+        
+        return jsonify({
+            'order_id': order.order_id,
+            'customer_id': order.customer_id,
+            'total_items': len(expanded_items),
+            'subtotal': float(order.subtotal),
+            'total_amount': float(order.total_amount),
+            'payment_status': order.payment_status,
+            'fulfillment_status': order.fulfillment_status,
+            'delivery_status': order.delivery_status,
+            'created_at': order.created_at.isoformat(),
+            'items': expanded_items
+        })
+    except Exception as e:
+        # Log the error for debugging
+        print(f"Error in get_order_items_expanded: {str(e)}")
+        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
