@@ -4,7 +4,8 @@ from extensions import db
 class Order(db.Model):
     __tablename__ = 'orders'
     
-    order_id = db.Column(db.Integer, primary_key=True)
+    # order_id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.String(20), primary_key=True)  # Changed from Integer to String
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.customer_id', ondelete='CASCADE'), nullable=True)
     offline_customer_id = db.Column(db.Integer, db.ForeignKey('offline_customer.customer_id', ondelete='CASCADE'), nullable=True)
     address_id = db.Column(db.Integer, db.ForeignKey('address.address_id'), nullable=False)
@@ -40,7 +41,8 @@ class OrderItem(db.Model):
     __tablename__ = 'order_items'
     
     item_id = db.Column(db.Integer, primary_key=True)
-    order_id = db.Column(db.Integer, db.ForeignKey('orders.order_id'), nullable=False)
+    # order_id = db.Column(db.Integer, db.ForeignKey('orders.order_id'), nullable=False)
+    order_id = db.Column(db.String(20), db.ForeignKey('orders.order_id'), nullable=False)  # Changed
     product_id = db.Column(db.Integer, db.ForeignKey('products.product_id'), nullable=False)
     model_id = db.Column(db.Integer, db.ForeignKey('product_models.model_id'), nullable=True)
     color_id = db.Column(db.Integer, db.ForeignKey('product_colors.color_id'), nullable=True)
@@ -53,6 +55,17 @@ class OrderItem(db.Model):
     order = db.relationship('Order', back_populates='items')
     model = db.relationship('ProductModel', backref='order_items')
     color = db.relationship('ProductColor', backref='order_items')
+    serial_numbers = db.relationship('SerialNumber', back_populates='order_item', cascade="all, delete-orphan")
+
+class SerialNumber(db.Model):
+    __tablename__ = 'serial_numbers'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    item_id = db.Column(db.Integer, db.ForeignKey('order_items.item_id', ondelete='CASCADE'), nullable=False)
+    sr_number = db.Column(db.String(50), nullable=True)
+    
+    # Relationship
+    order_item = db.relationship('OrderItem', back_populates='serial_numbers')
 
 
 class OrderDetail(db.Model):
@@ -60,8 +73,9 @@ class OrderDetail(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey('order_items.item_id', ondelete='CASCADE'), nullable=False)
-    sr_no = db.Column(db.Integer, nullable=True)
-    order_id = db.Column(db.Integer, db.ForeignKey('orders.order_id', ondelete='CASCADE'), nullable=False)
+    sr_no = db.Column(db.String(250), nullable=True)
+    # order_id = db.Column(db.Integer, db.ForeignKey('orders.order_id', ondelete='CASCADE'), nullable=False)
+    order_id = db.Column(db.String(20), db.ForeignKey('orders.order_id', ondelete='CASCADE'), nullable=False)  # Changed
     product_id = db.Column(db.Integer, db.ForeignKey('products.product_id', ondelete='CASCADE'), nullable=False)
     
     # Relationships

@@ -1,9 +1,10 @@
 from flask import Blueprint, request, jsonify
-from models.order import Order, OrderItem
+from models.order import Order, OrderItem  , OrderDetail
 from models.offline_customer import OfflineCustomer
 from models.cart import Cart,CartItem
 from models.product import Product,ProductColor,ProductModel,ModelSpecification,ProductSpecification
 from models.address import Address
+from models.device import DeviceTransaction
 import decimal
 from extensions import db
 from datetime import datetime
@@ -436,7 +437,9 @@ def clear_cart():
 
 @order_bp.route('/orders', methods=['GET'])
 def get_orders():
-    orders = Order.query.all()
+
+    orders = Order.query.order_by(Order.created_at.desc()).all()
+
     return jsonify([{
         'order_id': order.order_id,
         'customer_id': order.customer_id,
@@ -483,14 +486,40 @@ def get_orders():
     } for order in orders])
 
 
+def generate_order_id():
+    """
+    Generates order ID in format YYYY(CurrentYear)YY(NextYear)#SequenceNumber
+    Example: For year 2025 → '202526#1', '202526#2', etc.
+    """
+    current_year = datetime.now().year
+    next_year = current_year + 1
+    
+    # Format: Full current year + last 2 digits of next year
+    year_part = f"{current_year}{next_year % 100:02d}"
+    
+    # Find the highest existing sequence number for this year pattern
+    last_order = Order.query.filter(
+        Order.order_id.like(f"{year_part}#%")
+    ).order_by(Order.order_id.desc()).first()
+    
+    if last_order:
+        try:
+            # Extract the number after # and increment
+            last_num = int(last_order.order_id.split('#')[1])
+            sequence_num = last_num + 1
+        except (IndexError, ValueError):
+            # Fallback if format is corrupted
+            sequence_num = 1
+    else:
+        sequence_num = 1
+    
+    return f"{year_part}#{sequence_num}"
 
 
 @order_bp.route('/orders', methods=['POST'])
 @token_required(roles=['admin'])
 def create_order():
     data = request.get_json()
-    
-    print("Incoming order data:", data)
     
     # Validate customer
     customer = OfflineCustomer.query.get(data['customer_id'])
@@ -507,12 +536,8 @@ def create_order():
     order_items = []
     
     for item in data['items']:
-        print(f"Processing item: {item}")
-        print("Type of unit_price:", type(item.get('unit_price')))
-        
         product = Product.query.get(item['product_id'])
         if not product:
-            # Return more detailed error
             return jsonify({
                 'error': f'Product {item["product_id"]} not found',
                 'available_products': [p.product_id for p in Product.query.limit(10).all()]
@@ -536,22 +561,28 @@ def create_order():
         total_price = unit_price * item['quantity']
         subtotal += total_price
         
-        order_items.append(OrderItem(
+        # Create order item
+        order_item = OrderItem(
             product_id=item['product_id'],
             model_id=item.get('model_id'),
             color_id=item.get('color_id'),
             quantity=item['quantity'],
             unit_price=unit_price,
             total_price=total_price
-        ))
+        )
+        order_items.append(order_item)
     
     # Calculate final amount
     discount_amount = (subtotal * data['discount_percent']) / 100
     tax_amount = ((subtotal - discount_amount) * data['tax_percent']) / 100
     total_amount = subtotal - discount_amount + tax_amount + data['delivery_charge']
     
+    # Generate new order ID
+    order_id = generate_order_id()
+    
     # Create order
     order = Order(
+        order_id=order_id,
         offline_customer_id=data['customer_id'],
         address_id=address.address_id,
         total_items=len(data['items']),
@@ -560,7 +591,7 @@ def create_order():
         delivery_charge=data['delivery_charge'],
         tax_percent=data['tax_percent'],
         total_amount=total_amount,
-        channel=data.get('channel', 'offline'),
+        channel='offline',  # Hardcoded for this endpoint
         payment_status=data.get('payment_status', 'paid'),
         fulfillment_status=data.get('fulfillment_status', False),
         delivery_status=data.get('delivery_status', 'intransit'),
@@ -570,17 +601,31 @@ def create_order():
     db.session.add(order)
     db.session.flush()  # Get order_id
     
-    # Add items to order
+    # Add items to order and create order details
     for item in order_items:
-        item.order_id = order.order_id
+        item.order_id = order_id
         db.session.add(item)
+        db.session.flush()  # Get item_id
+        
+        # Create order details for each quantity
+        for i in range(1, item.quantity + 1):
+            order_detail = OrderDetail(
+                item_id=item.item_id,
+                order_id=order_id,
+                product_id=item.product_id
+            )
+            db.session.add(order_detail)
     
-    db.session.commit()
-    
-    return jsonify({
-        'message': 'Order created successfully',
-        'order_id': order.order_id
-    }), 201
+    try:
+        db.session.commit()
+        return jsonify({
+            'message': 'Order created successfully',
+            'order_id': order_id
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Error creating order: {str(e)}'}), 500
+
 
 
 
@@ -636,8 +681,12 @@ def place_order():
     tax_amount = ((subtotal - discount_amount) * tax_percent) / 100
     total_amount = subtotal - discount_amount + tax_amount + delivery_charge
     
-    # Create new order
+    # Generate new order ID
+    order_id = generate_order_id()
+    
+    # Create new order with custom ID
     order = Order(
+        order_id=order_id,
         customer_id=customer_id,
         address_id=data['address_id'],
         total_items=len(cart_items),
@@ -646,7 +695,7 @@ def place_order():
         delivery_charge=delivery_charge,
         tax_percent=tax_percent,
         total_amount=total_amount,
-        channel=data.get('channel', 'online'),
+        channel='online',  # Hardcoded for this endpoint
         payment_status=data['payment_status'],
         fulfillment_status=False,
         delivery_status='pending',
@@ -656,9 +705,8 @@ def place_order():
     )
     
     db.session.add(order)
-    db.session.flush()  # Get order_id
     
-    # Create order items from cart items
+    # Create order items from cart items and order details
     order_items = []
     for cart_item in cart_items:
         # Get product and price information
@@ -684,7 +732,7 @@ def place_order():
         
         # Create order item
         order_item = OrderItem(
-            order_id=order.order_id,
+            order_id=order_id,
             product_id=cart_item.product_id,
             model_id=cart_item.model_id,
             color_id=cart_item.color_id,
@@ -693,8 +741,19 @@ def place_order():
             total_price=cart_item.total_item_price
         )
         
-        order_items.append(order_item)
         db.session.add(order_item)
+        db.session.flush()  # Get item_id
+        
+        # Create order details for each quantity
+        for i in range(1, cart_item.quantity + 1):
+            order_detail = OrderDetail(
+                item_id=order_item.item_id,
+                order_id=order_id,
+                product_id=cart_item.product_id
+            )
+            db.session.add(order_detail)
+        
+        order_items.append(order_item)
     
     # Clear cart items
     for item in cart_items:
@@ -710,7 +769,7 @@ def place_order():
             'success': True,
             'message': 'Order placed successfully',
             'order': {
-                'order_id': order.order_id,
+                'order_id': order_id,
                 'customer_id': customer_id,
                 'total_items': order.total_items,
                 'subtotal': float(order.subtotal),
@@ -738,7 +797,8 @@ def place_order():
 
 
 
-@order_bp.route('/orders/<int:order_id>/items-expanded', methods=['GET'])
+
+@order_bp.route('/orders/<string:order_id>/items-expanded', methods=['GET'])
 def get_order_items_expanded(order_id):
     try:
         order = Order.query.get(order_id)
@@ -782,3 +842,166 @@ def get_order_items_expanded(order_id):
         # Log the error for debugging
         print(f"Error in get_order_items_expanded: {str(e)}")
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
+    
+
+
+@order_bp.route('/orders/<string:order_id>/details-expanded', methods=['GET'])
+def get_order_details_expanded(order_id):
+    try:
+        # Get the order and verify it exists
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({'error': 'Order not found'}), 404
+        
+        # Get all order details for this order
+        order_details = OrderDetail.query.filter_by(order_id=order_id).all()
+        
+        expanded_details = []
+        for detail in order_details:
+            # Get related order item
+            order_item = detail.item
+            
+            # Safely access related objects
+            product_name = order_item.product.name if order_item.product and hasattr(order_item, 'product') else None
+            model_name = order_item.model.name if order_item.model and hasattr(order_item, 'model') else None
+            color_name = order_item.color.name if order_item.color and hasattr(order_item, 'color') else None
+            
+            expanded_details.append({
+                'detail_id': detail.id,
+                'item_id': detail.item_id,
+                'order_id': detail.order_id,
+                'product_id': detail.product_id,
+                'sr_no': detail.sr_no,
+                'product_name': product_name,
+                'model_name': model_name,
+                'color_name': color_name,
+                'unit_price': float(order_item.unit_price) if order_item else 0,
+                'status': getattr(detail, 'status', None),  # Safely get status if it exists
+                'created_at': detail.created_at.isoformat() if hasattr(detail, 'created_at') and detail.created_at else None
+            })
+        
+        return jsonify({
+            'order_id': order.order_id,
+            'customer_id': order.customer_id,
+            'total_details': len(expanded_details),
+            'subtotal': float(order.subtotal),
+            'total_amount': float(order.total_amount),
+            'payment_status': order.payment_status,
+            'fulfillment_status': order.fulfillment_status,
+            'delivery_status': order.delivery_status,
+            'created_at': order.created_at.isoformat(),
+            'details': expanded_details
+        })
+    except Exception as e:
+        # Log the error for debugging
+        print(f"Error in get_order_details_expanded: {str(e)}")
+        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
+
+
+
+# @order_bp.route('/orders/save-sr-numbers', methods=['POST'])
+# def save_serial_numbers():
+#     try:
+#         data = request.get_json()
+        
+#         # Validate request data
+#         if not data or not isinstance(data, list):
+#             return jsonify({'error': 'Invalid request data format'}), 400
+        
+#         # Process each serial number
+#         for sr_data in data:
+#             # Find the order detail record
+#             detail = OrderDetail.query.get(sr_data['detail_id'])
+#             if not detail:
+#                 continue  # Skip if detail not found
+                
+#             # Update the SR number only in OrderDetail
+#             detail.sr_no = sr_data['sr_no']
+#             db.session.add(detail)
+        
+#         db.session.commit()
+        
+#         return jsonify({
+#             'success': True,
+#             'message': 'Serial numbers saved successfully to OrderDetail'
+#         })
+        
+#     except Exception as e:
+#         db.session.rollback()
+#         print(f"Error saving serial numbers: {str(e)}")
+#         return jsonify({
+#             'error': 'Failed to save serial numbers',
+#             'details': str(e)
+#         }), 500
+
+
+@order_bp.route('/orders/save-sr-numbers', methods=['POST'])
+def save_serial_numbers():
+    try:
+        data = request.get_json()
+        
+        # Validate request data
+        if not data or not isinstance(data, list):
+            return jsonify({'error': 'Invalid request data format'}), 400
+        
+        # Get order details first to get order information
+        order_details = []
+        for sr_data in data:
+            detail = OrderDetail.query.get(sr_data['detail_id'])
+            if not detail:
+                continue
+            order_details.append(detail)
+        
+        if not order_details:
+            return jsonify({'error': 'No valid order details found'}), 400
+        
+        # Get the order from the first detail (all details should belong to the same order)
+        order = order_details[0].order
+
+        # Fallback SKU settings
+        sku_prefix = 'sku'
+        fallback_sku_counter = 123  # Starting point for fallback SKUs
+
+        # Process each serial number
+        for index, (sr_data, detail) in enumerate(zip(data, order_details)):
+            sr_no = sr_data.get('sr_no')
+            if not sr_no:
+                continue  # Skip if no SR number provided
+                
+            # Update the SR number in OrderDetail
+            detail.sr_no = sr_no
+            db.session.add(detail)
+
+            # Determine the SKU (with fallback)
+            if detail.item and hasattr(detail.item, 'sku') and detail.item.sku:
+                sku_id = detail.item.sku
+            else:
+                sku_id = f"{sku_prefix}{fallback_sku_counter + index}"
+
+            # Create OUT transaction for this device
+            transaction = DeviceTransaction(
+                device_srno=sr_no,
+                device_name=detail.item.product.name if detail.item and detail.item.product else 'Unknown Device',
+                sku_id=sku_id,
+                order_id=order.order_id,
+                in_out=2,  # OUT transaction
+                create_date=datetime.now().date(),
+                price=float(detail.item.unit_price) if detail.item and hasattr(detail.item, 'unit_price') else None,
+                remarks=f"Device sold in order {order.order_id}"
+            )
+            db.session.add(transaction)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Serial numbers saved successfully and OUT transactions created'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error saving serial numbers: {str(e)}")
+        return jsonify({
+            'error': 'Failed to save serial numbers',
+            'details': str(e)
+        }), 500

@@ -92,6 +92,7 @@ class Product(db.Model):
     raters = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    sku_id = db.Column(db.String(100), nullable=True, unique=True)
     
     
     

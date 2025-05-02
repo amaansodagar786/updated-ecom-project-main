@@ -15,10 +15,10 @@ from routes.state import state_bp
 from routes.address import address_bp
 from routes.offline_customer_routes import offline_customer_bp
 # Add this import at the top with other imports
-from routes.forgotpass import forgotpass_bp
-from routes.deviceinfo import device_transaction_bp
+from routes.forgotpass import forgotpass_bp  #new import
+from routes.deviceinfo import device_transaction_bp #new import
 
-from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.background import BackgroundScheduler 
 from services.stock_notifier import check_and_notify  # Import from services folder
 
 
@@ -114,8 +114,8 @@ app.register_blueprint(state_bp)
 app.register_blueprint(address_bp)
 app.register_blueprint(offline_customer_bp)
 # Add this with other blueprint registrations
-app.register_blueprint(forgotpass_bp)
-app.register_blueprint(device_transaction_bp)
+app.register_blueprint(forgotpass_bp) #new import
+app.register_blueprint(device_transaction_bp) #new import
 
 
 @app.after_request
@@ -146,7 +146,6 @@ def unauthorized(error):
 def home():
     return "Hello, World!"
 
-3
 if __name__ == '__main__':
     # Ensure database tables are created
     with app.app_context():

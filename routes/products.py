@@ -43,7 +43,8 @@ def list_products():
                 'description': product.description,
                 'category': product.main_category.name if product.main_category else None,
                 'subcategory': product.sub_category.name if product.sub_category else None,
-                'hsn': product.hsn.hsn_code if product.hsn else None,                
+                'hsn': product.hsn.hsn_code if product.hsn else None,
+                'sku_id': product.sku_id,                
                 'product_type': product.product_type,
                 'rating': product.rating,
                 'raters': product.raters,
@@ -131,6 +132,7 @@ def product_detail(product_id):
             'category': product.main_category.name if product.main_category else None,
             'subcategory': product.sub_category.name if product.sub_category else None,
             'hsn_id': product.hsn.hsn_code if product.hsn else None,
+            'sku_id': product.sku_id,
             'product_type': product.product_type,
             'rating': product.rating,
             'raters': product.raters,
@@ -841,6 +843,18 @@ def add_product():
                                     )
                                     db.session.add(image)
 
+        hsn_code = ""
+        if hsn_id:
+            hsn_code = db.session.query(HSN.hsn_code).filter(HSN.hsn_id == hsn_id).scalar() or "NA"
+        else:
+            hsn_code = "NA"
+
+        # Format the SKU ID
+        sku_id = f"{category_id}-{subcategory_id}-{hsn_code}-{new_product.product_id}"
+
+        # Update the product with the SKU ID
+        new_product.sku_id = sku_id
+
         # Commit all changes
         db.session.commit()
 
@@ -975,6 +989,8 @@ def add_subcategory():
         logger.error(f"Error adding subcategory: {str(e)}")
         return jsonify({'message': 'An error occurred while adding the subcategory'}), 500
 
+
+
 @products_bp.route('/products/by-category/<int:category_id>', methods=['GET'])
 def get_products_by_category(category_id):
     products = Product.query.filter_by(category_id=category_id).all()
@@ -987,6 +1003,8 @@ def get_products_by_category(category_id):
             'description': product.description,
             'category_id': product.category_id,
             'subcategory_id': product.subcategory_id,
+            'hsn': product.hsn.hsn_code if product.hsn else None,
+            'sku_id': product.sku_id,
             'product_type': product.product_type,
             'rating': product.rating,
             'raters': product.raters,
