@@ -8,6 +8,7 @@ from models.device import DeviceTransaction
 import decimal
 from extensions import db
 from datetime import datetime
+from urllib.parse import unquote
 
 from middlewares.auth import token_required
 
@@ -560,6 +561,19 @@ def create_order():
         
         total_price = unit_price * item['quantity']
         subtotal += total_price
+
+        # Check stock availability and update stock quantity
+        if item.get('color_id'):
+            color = ProductColor.query.get(item['color_id'])
+            if not color:
+                return jsonify({'error': f'Color {item["color_id"]} not found for product {product.product_id}'}), 404
+            if color.stock_quantity < item['quantity']:
+                return jsonify({
+                    'error': f'Not enough stock for product color. Only {color.stock_quantity} available.',
+                    'product_id': product.product_id,
+                    'color_id': item['color_id']
+                }), 400
+            color.stock_quantity -= item['quantity']  # Update stock quantity
         
         # Create order item
         order_item = OrderItem(
@@ -844,7 +858,7 @@ def get_order_items_expanded(order_id):
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
     
 
-
+# ADMIN ORDERS 
 @order_bp.route('/orders/<string:order_id>/details-expanded', methods=['GET'])
 def get_order_details_expanded(order_id):
     try:
@@ -1005,3 +1019,253 @@ def save_serial_numbers():
             'error': 'Failed to save serial numbers',
             'details': str(e)
         }), 500
+
+
+# USER ORDERS 
+@order_bp.route('/customer/<int:customer_id>/orders', methods=['GET'])
+def get_customer_orders(customer_id):
+    """Get all orders for a specific customer"""
+    try:
+        # Get both online and offline orders for this customer
+        orders = Order.query.filter(
+            (Order.customer_id == customer_id) | 
+            (Order.offline_customer_id == customer_id)
+        ).order_by(Order.created_at.desc()).all()
+
+        if not orders:
+            return jsonify({'message': 'No orders found for this customer'}), 404
+
+        return jsonify([{
+            'order_id': order.order_id,
+            'total_amount': float(order.total_amount),
+            'payment_status': order.payment_status,
+            'delivery_status': order.delivery_status,
+            'created_at': order.created_at.isoformat(),
+            'item_count': order.total_items
+        } for order in orders])
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
+@order_bp.route('/order/<path:order_id>/items', methods=['GET'])
+def get_order_items(order_id):
+    """Get all items for a specific order with complete details"""
+    try:
+        # No need to unquote since Flask handles path conversion
+        print(f"Looking for order: {order_id}")  # Debug log
+        
+        # Find exact match (including special characters)
+        order = Order.query.filter_by(order_id=order_id).first()
+        
+        if not order:
+            print(f"Order not found. Existing orders: {[o.order_id for o in Order.query.limit(10).all()]}")
+            return jsonify({'message': 'Order not found'}), 404
+
+        items = []
+        for item in order.items:
+            product = Product.query.get(item.product_id)
+            product_image = product.images[0].image_url if product and product.images else None
+            
+            items.append({
+                'product_id': item.product_id,
+                'product_name': product.name if product else f"Product {item.product_id}",
+                'product_image': product_image,
+                'model': item.model.name if item.model else None,
+                'color': item.color.name if item.color else None,
+                'quantity': item.quantity,
+                'unit_price': float(item.unit_price),
+                'total_price': float(item.total_price),
+                'serial_numbers': [sn.sr_number for sn in item.serial_numbers]
+            })
+
+        return jsonify({
+            'order_id': order.order_id,
+            'customer_id': order.customer_id or order.offline_customer_id,
+            'created_at': order.created_at.isoformat(),
+            'items': items,
+            'delivery_status': order.delivery_status,
+            'payment_status': order.payment_status,
+            'total_amount': float(order.total_amount),
+            'total_items': order.total_items
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
+@order_bp.route('/order/add-to-order', methods=['POST'])
+@token_required(roles=['customer'])
+def add_to_order():
+    data = request.get_json()
+    
+    # Validate required fields
+    required_fields = ['product_id', 'address_id', 'payment_status', 'delivery_method', 'quantity']
+    for field in required_fields:
+        if field not in data:
+            return jsonify({'error': f'Missing required field: {field}'}), 400
+    
+    # Validate quantity is a positive integer
+    try:
+        quantity = int(data['quantity'])
+        if quantity <= 0:
+            return jsonify({'error': 'Quantity must be a positive integer'}), 400
+        data['quantity'] = quantity
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Quantity must be a valid number'}), 400
+    
+    # Optional fields with defaults
+    model_id = data.get('model_id')
+    color_id = data.get('color_id')
+    discount_percent = data.get('discount_percent', 0)
+    tax_percent = data.get('tax_percent', 0)
+    delivery_charge = data.get('delivery_charge', 0)
+    
+    # Get customer ID from token
+    customer_id = request.current_user.customer_id
+    
+    # Verify address belongs to customer
+    address = Address.query.get(data['address_id'])
+    if not address or address.customer_id != customer_id:
+        return jsonify({'error': 'Invalid address for this customer'}), 404
+    
+    # Get product information
+    product = Product.query.get(data['product_id'])
+    if not product:
+        return jsonify({'error': f'Product not found: {data["product_id"]}'}), 404
+    
+    # Determine unit price and verify stock
+    if color_id:
+        color = ProductColor.query.get(color_id)
+        if not color:
+            return jsonify({'error': f'Product color not found: {color_id}'}), 404
+        
+        # Check if color belongs to this product
+        if color.product_id != data['product_id']:
+            return jsonify({'error': 'Color does not belong to this product'}), 400
+        
+        # Verify stock availability
+        if data['quantity'] > color.stock_quantity:
+            return jsonify({
+                'error': f'Not enough stock for product. Only {color.stock_quantity} available.',
+                'product_id': data['product_id'],
+                'color_id': color_id
+            }), 400
+        
+        unit_price = color.price
+    
+    # Calculate order totals
+    subtotal = unit_price * data['quantity']
+    total_item_price = subtotal
+    
+    # Calculate final amount
+    discount_amount = (subtotal * discount_percent) / 100
+    tax_amount = ((subtotal - discount_amount) * tax_percent) / 100
+    total_amount = subtotal - discount_amount + tax_amount + delivery_charge
+    
+    try:
+        # Get the next order_index value
+        max_order = db.session.query(db.func.max(Order.order_index)).scalar() or 0
+        next_order_index = max_order + 1
+        
+        # Current date for order_id generation
+        current_date = datetime.now()
+        
+        # Create new order with explicit order_index
+        order = Order(
+            order_index=next_order_index,
+            customer_id=customer_id,
+            address_id=data['address_id'],
+            total_items=data['quantity'],
+            subtotal=subtotal,
+            discount_percent=discount_percent,
+            delivery_charge=delivery_charge,
+            tax_percent=tax_percent,
+            total_amount=total_amount,
+            channel='online',
+            payment_status=data['payment_status'],
+            fulfillment_status=False,
+            delivery_status='pending',
+            delivery_method=data['delivery_method'],
+            awb_number=data.get('awb_number'),
+            created_at=current_date
+        )
+        
+        # Manually set the order_id with the expected format
+        date_str = current_date.strftime('%d-%m-%Y')
+        order.order_id = f"{date_str}#{next_order_index}"
+        
+        db.session.add(order)
+        db.session.flush()
+        
+        # Create order item
+        order_item = OrderItem(
+            order_id=order.order_id,
+            product_id=data['product_id'],
+            model_id=model_id,
+            color_id=color_id,
+            quantity=data['quantity'],
+            unit_price=unit_price,
+            total_price=total_item_price
+        )
+        
+        db.session.add(order_item)
+        db.session.flush()  # Get item_id
+        
+        # Create order details for each quantity
+        for i in range(1, data['quantity'] + 1):
+            order_detail = OrderDetail(
+                item_id=order_item.item_id,
+                order_id=order.order_id,
+                product_id=data['product_id']
+            )
+            db.session.add(order_detail)
+        
+        # Update stock quantity if color is specified
+        if color_id:
+            color = ProductColor.query.get(color_id)
+            color.stock_quantity -= data['quantity']
+            if color.stock_quantity < 0:
+                db.session.rollback()
+                return jsonify({'error': f'Not enough stock for product {product.name}'}), 400
+        else:
+            # If we're tracking stock at the product level instead of color level
+            if hasattr(product, 'stock_quantity'):
+                product.stock_quantity -= data['quantity']
+                if product.stock_quantity < 0:
+                    db.session.rollback()
+                    return jsonify({'error': f'Not enough stock for product {product.name}'}), 400
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Order placed successfully',
+            'order': {
+                'order_id': order.order_id,
+                'customer_id': customer_id,
+                'total_items': order.total_items,
+                'subtotal': float(order.subtotal),
+                'discount_percent': float(order.discount_percent),
+                'delivery_charge': float(order.delivery_charge),
+                'tax_percent': float(order.tax_percent),
+                'total_amount': float(order.total_amount),
+                'payment_status': order.payment_status,
+                'delivery_method': order.delivery_method,
+                'created_at': order.created_at.isoformat(),
+                'items': [{
+                    'product_id': order_item.product_id,
+                    'model_id': order_item.model_id,
+                    'color_id': order_item.color_id,
+                    'quantity': order_item.quantity,
+                    'unit_price': float(order_item.unit_price),
+                    'total_price': float(order_item.total_price)
+                }]
+            }
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Error creating order: {str(e)}'}), 500
+

@@ -20,6 +20,7 @@ from routes.deviceinfo import device_transaction_bp #new import
 
 from apscheduler.schedulers.background import BackgroundScheduler 
 from services.stock_notifier import check_and_notify  # Import from services folder
+from routes.review import reviews_bp
 
 
 
@@ -35,6 +36,7 @@ from models.product import ProductModel, ProductColor, ModelSpecification
 from models.address import Address
 from models.state import State
 from models.hsn import HSN
+# from flask_migrate import Migrate
 
 
 import os
@@ -116,6 +118,7 @@ app.register_blueprint(offline_customer_bp)
 # Add this with other blueprint registrations
 app.register_blueprint(forgotpass_bp) #new import
 app.register_blueprint(device_transaction_bp) #new import
+app.register_blueprint(reviews_bp)
 
 
 @app.after_request
