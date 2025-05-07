@@ -101,6 +101,7 @@ def get_all_reviews():
     return jsonify([review.to_dict() for review in reviews]), 200
 
 
+
 @reviews_bp.route('/reviews/customer/<int:customer_id>', methods=['GET'])
 def get_reviews_by_customer(customer_id):
     """

@@ -1,6 +1,4 @@
-# from flask import Blueprint, request, jsonify
-from flask import Blueprint, request, jsonify, app
-
+from flask import Blueprint, request, jsonify
 from models.offline_customer import OfflineCustomer
 from models.address import Address
 from extensions import db
@@ -8,12 +6,8 @@ from flask_login import login_required, current_user
 from middlewares.auth import token_required
 from services.pincode_check import is_service_available
 
-# from flask_cors import CORS
-# CORS(app, resources={r"/offline-customers": {"origins": "http://localhost:5173"}})
-
 offline_customer_bp = Blueprint('offline_customer', __name__)
 
-# Create
 # Create
 @offline_customer_bp.route('/offline-customers', methods=['POST'])
 @token_required(roles=['admin'])
@@ -51,8 +45,8 @@ def create_offline_customer():
 
         # Check if pincode is serviceable
         service_check = is_service_available(address_data['pincode'])
-        if not service_check['success']:
-            return jsonify(service_check), 200
+        is_available = service_check['success']
+        new_address.is_available = is_available
 
         db.session.add(new_address)
     
@@ -64,7 +58,6 @@ def create_offline_customer():
         customer_dict['address'] = new_address.to_dict()
     
     return jsonify(customer_dict), 201
-
 
 # Read (Get all)
 @offline_customer_bp.route('/offline-customers', methods=['GET'])
@@ -78,9 +71,6 @@ def get_offline_customers():
         customer_data['addresses'] = addresses
         result.append(customer_data)
     return jsonify(result)
-
-
-
 
 # Read (Get one)
 @offline_customer_bp.route('/offline-customers/<int:customer_id>', methods=['GET'])

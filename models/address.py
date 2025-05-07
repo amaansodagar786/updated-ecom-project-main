@@ -6,10 +6,10 @@ class Address(db.Model):
     __tablename__ = 'address'
     
     address_id = db.Column(db.Integer, primary_key=True)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customer.customer_id', ondelete='CASCADE'), nullable=True)  # Made nullable
-    offline_customer_id = db.Column(db.Integer, db.ForeignKey('offline_customer.customer_id', ondelete='CASCADE'), nullable=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.customer_id', ondelete='CASCADE'), nullable=True)  # NULL होने दें
+    offline_customer_id = db.Column(db.Integer, db.ForeignKey('offline_customer.customer_id', ondelete='CASCADE'), nullable=True)  # NULL होने दें
     
-    # नए  फील्ड्स
+    # नए फील्ड्स
     name = db.Column(db.String(255), nullable=False)
     mobile = db.Column(db.String(15), nullable=False)
     pincode = db.Column(db.String(10), nullable=False)
@@ -20,6 +20,7 @@ class Address(db.Model):
     landmark = db.Column(db.String(255))
     alternate_phone = db.Column(db.String(15))
     address_type = db.Column(db.String(20), nullable=False, default='Home')
+    is_available = db.Column(db.Boolean, default=False)  # यह पता सेवा में है या नहीं
     
     # लोकेशन कोऑर्डिनेट्स
     latitude = db.Column(db.Float)
@@ -30,13 +31,8 @@ class Address(db.Model):
 
     # Foreign Keys और Constraints
     __table_args__ = (
-        db.CheckConstraint(
-            '(customer_id IS NOT NULL AND offline_customer_id IS NULL) OR '
-            '(customer_id IS NULL AND offline_customer_id IS NOT NULL)',
-            name='check_address_customer_type'
-        ),
+        db.CheckConstraint('customer_id IS NOT NULL OR offline_customer_id IS NOT NULL', name='check_address_customer_type'),
     )
-
     
     # Relationships
     customer = db.relationship('Customer', back_populates='addresses')

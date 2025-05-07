@@ -4,8 +4,12 @@ from extensions import db
 class Order(db.Model):
     __tablename__ = 'orders'
     
-    # order_id = db.Column(db.Integer, primary_key=True)
-    order_id = db.Column(db.String(20), primary_key=True)  # Changed from Integer to String
+    # New columns - explicit autoincrement
+    order_index = db.Column(db.Integer, autoincrement=True, nullable=False, unique=True)
+    
+    # Computed order_id
+    order_id = db.Column(db.String(30), primary_key=True, unique=True)  # Increased length to accommodate date
+
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.customer_id', ondelete='CASCADE'), nullable=True)
     offline_customer_id = db.Column(db.Integer, db.ForeignKey('offline_customer.customer_id', ondelete='CASCADE'), nullable=True)
     address_id = db.Column(db.Integer, db.ForeignKey('address.address_id'), nullable=False)
@@ -21,6 +25,7 @@ class Order(db.Model):
     delivery_status = db.Column(db.String(20), default='intransit')
     delivery_method = db.Column(db.String(20), default='shipping')
     awb_number = db.Column(db.String(50), nullable=True)
+    upload_wbn = db.Column(db.String(50), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -30,6 +35,19 @@ class Order(db.Model):
         db.ForeignKeyConstraint(['offline_customer_id'], ['offline_customer.customer_id'], ondelete='CASCADE'),
         db.CheckConstraint('customer_id IS NOT NULL OR offline_customer_id IS NOT NULL', name='check_order_customer_type'),
     )
+    
+    # Modified generate_order_id method
+    def generate_order_id(self):
+        if not self.order_index:
+            raise ValueError("order_index must be set before generating order_id")
+        date_str = self.created_at.strftime('%d-%m-%Y')
+        return f"{date_str}#{self.order_index}"
+    
+    # Modified __init__ method - does not set order_id automatically
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Note: No longer automatically setting order_id here 
+        # This should be done explicitly after setting order_index
     
     # Relationships
     customer = db.relationship('Customer', back_populates='orders')
@@ -41,8 +59,7 @@ class OrderItem(db.Model):
     __tablename__ = 'order_items'
     
     item_id = db.Column(db.Integer, primary_key=True)
-    # order_id = db.Column(db.Integer, db.ForeignKey('orders.order_id'), nullable=False)
-    order_id = db.Column(db.String(20), db.ForeignKey('orders.order_id'), nullable=False)  # Changed
+    order_id = db.Column(db.String(30), db.ForeignKey('orders.order_id'), nullable=False)  # Increased length
     product_id = db.Column(db.Integer, db.ForeignKey('products.product_id'), nullable=False)
     model_id = db.Column(db.Integer, db.ForeignKey('product_models.model_id'), nullable=True)
     color_id = db.Column(db.Integer, db.ForeignKey('product_colors.color_id'), nullable=True)
@@ -74,8 +91,7 @@ class OrderDetail(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey('order_items.item_id', ondelete='CASCADE'), nullable=False)
     sr_no = db.Column(db.String(250), nullable=True)
-    # order_id = db.Column(db.Integer, db.ForeignKey('orders.order_id', ondelete='CASCADE'), nullable=False)
-    order_id = db.Column(db.String(20), db.ForeignKey('orders.order_id', ondelete='CASCADE'), nullable=False)  # Changed
+    order_id = db.Column(db.String(30), db.ForeignKey('orders.order_id', ondelete='CASCADE'), nullable=False)  # Increased length
     product_id = db.Column(db.Integer, db.ForeignKey('products.product_id', ondelete='CASCADE'), nullable=False)
     
     # Relationships

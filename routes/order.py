@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
-from models.order import Order, OrderItem  , OrderDetail
+from models.order import Order,OrderItem,OrderDetail
+from models.customer import Customer
 from models.offline_customer import OfflineCustomer
 from models.cart import Cart,CartItem
 from models.product import Product,ProductColor,ProductModel,ModelSpecification,ProductSpecification
@@ -7,8 +8,12 @@ from models.address import Address
 from models.device import DeviceTransaction
 import decimal
 from extensions import db
+from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
-from urllib.parse import unquote
+import os
+import requests
+import json
+
 
 from middlewares.auth import token_required
 
@@ -106,7 +111,7 @@ def add_item_to_cart():
     product_id = data.get('product_id')
     model_id = data.get('model_id')
     color_id = data.get('color_id')
-    spec_id = data.get('spec_id')
+    # spec_id = data.get('spec_id')
     quantity = data.get('quantity', 1)
     
     # Fetch the product
@@ -128,9 +133,8 @@ def add_item_to_cart():
     elif product.product_type == 'single':
         if color_id:
             color = ProductColor.query.get(color_id)
-            price = color.price if color else product.price
-        else:
-            price = product.price
+            price = color.price
+        
     
     if not price:
         return jsonify({'error': 'Could not determine product price'}), 400
@@ -151,7 +155,7 @@ def add_item_to_cart():
         product_id=product_id,
         model_id=model_id,
         color_id=color_id,
-        spec_id=spec_id
+        # spec_id=spec_id
     ).first()
     
     if existing_item:
@@ -165,7 +169,7 @@ def add_item_to_cart():
             product_id=product_id,
             model_id=model_id,
             color_id=color_id,
-            spec_id=spec_id,
+            # spec_id=spec_id,
             quantity=quantity,
             total_item_price=total_item_price
         )
@@ -202,7 +206,7 @@ def delete_item_from_cart():
     product_id = data.get('product_id')
     model_id = data.get('model_id')
     color_id = data.get('color_id')
-    spec_id = data.get('spec_id')
+    # spec_id = data.get('spec_id')
     quantity_to_remove = data.get('quantity', 1)
     
     # Check if the user has a cart
@@ -221,8 +225,8 @@ def delete_item_from_cart():
         query = query.filter_by(model_id=model_id)
     if color_id is not None:
         query = query.filter_by(color_id=color_id)
-    if spec_id is not None:
-        query = query.filter_by(spec_id=spec_id)
+    # if spec_id is not None:
+    #     query = query.filter_by(spec_id=spec_id)
     
     cart_item = query.first()
     
@@ -269,9 +273,6 @@ def delete_item_from_cart():
         'cart_id': cart.cart_id,
         'total_cart_price': float(cart.total_cart_price)
     }), 200
-
-
-
 
 @order_bp.route('/cart/getbycustid' , methods=['GET'])
 @token_required(roles=['customer'])
@@ -482,164 +483,150 @@ def get_orders():
             'color_id': item.color_id,
             'quantity': item.quantity,
             'unit_price': float(item.unit_price),
-            'total_price': float(item.total_price)
+            'total_price': float(item.total_price),
+            'image_url': item.product.images[0].image_url if item.product and item.product.images else None,
         } for item in order.items]
     } for order in orders])
 
 
-def generate_order_id():
-    """
-    Generates order ID in format YYYY(CurrentYear)YY(NextYear)#SequenceNumber
-    Example: For year 2025 → '202526#1', '202526#2', etc.
-    """
-    current_year = datetime.now().year
-    next_year = current_year + 1
-    
-    # Format: Full current year + last 2 digits of next year
-    year_part = f"{current_year}{next_year % 100:02d}"
-    
-    # Find the highest existing sequence number for this year pattern
-    last_order = Order.query.filter(
-        Order.order_id.like(f"{year_part}#%")
-    ).order_by(Order.order_id.desc()).first()
-    
-    if last_order:
-        try:
-            # Extract the number after # and increment
-            last_num = int(last_order.order_id.split('#')[1])
-            sequence_num = last_num + 1
-        except (IndexError, ValueError):
-            # Fallback if format is corrupted
-            sequence_num = 1
-    else:
-        sequence_num = 1
-    
-    return f"{year_part}#{sequence_num}"
 
 
 @order_bp.route('/orders', methods=['POST'])
 @token_required(roles=['admin'])
 def create_order():
     data = request.get_json()
-    
+
     # Validate customer
-    customer = OfflineCustomer.query.get(data['customer_id'])
+    customer = OfflineCustomer.query.get(data.get('customer_id'))
     if not customer:
         return jsonify({'error': 'Customer not found'}), 404
-    
+
     # Get customer's default address
-    address = Address.query.filter_by(offline_customer_id=data['customer_id']).first()
+    address = Address.query.filter_by(offline_customer_id=customer.customer_id).first()
     if not address:
         return jsonify({'error': 'No address found for customer'}), 404
-    
-    # Calculate subtotal and create order items
+
     subtotal = 0
     order_items = []
-    
-    for item in data['items']:
+    stock_updates = []
+
+    # Prepare order items and check stock
+    for item in data.get('items', []):
         product = Product.query.get(item['product_id'])
         if not product:
+            return jsonify({'error': f"Product {item['product_id']} not found"}), 404
+
+        color = ProductColor.query.get(item.get('color_id')) if item.get('color_id') else None
+        model = ProductModel.query.get(item.get('model_id')) if item.get('model_id') else None
+
+        if color and color.stock_quantity < item['quantity']:
             return jsonify({
-                'error': f'Product {item["product_id"]} not found',
-                'available_products': [p.product_id for p in Product.query.limit(10).all()]
-            }), 404
-        
-        # Use frontend-provided price if available, otherwise calculate
-        unit_price = item.get('unit_price')
-        if unit_price is None:
-            color = ProductColor.query.get(item['color_id']) if item.get('color_id') else None
-            model = ProductModel.query.get(item['model_id']) if item.get('model_id') else None
-            
-            if color:
-                unit_price = color.price
-            elif hasattr(product, 'base_price'):
-                unit_price = product.base_price
-            elif hasattr(product, 'price'):
-                unit_price = product.price
-            else:
-                return jsonify({'error': f'No price found for product {product.product_id}'}), 400
-        
+                'error': f"Not enough stock for color '{color.name}'. Available: {color.stock_quantity}"
+            }), 400
+
+        unit_price = color.price
         total_price = unit_price * item['quantity']
         subtotal += total_price
 
-        # Check stock availability and update stock quantity
-        if item.get('color_id'):
-            color = ProductColor.query.get(item['color_id'])
-            if not color:
-                return jsonify({'error': f'Color {item["color_id"]} not found for product {product.product_id}'}), 404
-            if color.stock_quantity < item['quantity']:
-                return jsonify({
-                    'error': f'Not enough stock for product color. Only {color.stock_quantity} available.',
-                    'product_id': product.product_id,
-                    'color_id': item['color_id']
-                }), 400
-            color.stock_quantity -= item['quantity']  # Update stock quantity
-        
-        # Create order item
-        order_item = OrderItem(
-            product_id=item['product_id'],
-            model_id=item.get('model_id'),
-            color_id=item.get('color_id'),
-            quantity=item['quantity'],
-            unit_price=unit_price,
-            total_price=total_price
-        )
-        order_items.append(order_item)
-    
-    # Calculate final amount
-    discount_amount = (subtotal * data['discount_percent']) / 100
-    tax_amount = ((subtotal - discount_amount) * data['tax_percent']) / 100
-    total_amount = subtotal - discount_amount + tax_amount + data['delivery_charge']
-    
-    # Generate new order ID
-    order_id = generate_order_id()
-    
-    # Create order
-    order = Order(
-        order_id=order_id,
-        offline_customer_id=data['customer_id'],
-        address_id=address.address_id,
-        total_items=len(data['items']),
-        subtotal=subtotal,
-        discount_percent=data['discount_percent'],
-        delivery_charge=data['delivery_charge'],
-        tax_percent=data['tax_percent'],
-        total_amount=total_amount,
-        channel='offline',  # Hardcoded for this endpoint
-        payment_status=data.get('payment_status', 'paid'),
-        fulfillment_status=data.get('fulfillment_status', False),
-        delivery_status=data.get('delivery_status', 'intransit'),
-        delivery_method=data.get('delivery_method', 'shipping')
-    )
-    
-    db.session.add(order)
-    db.session.flush()  # Get order_id
-    
-    # Add items to order and create order details
-    for item in order_items:
-        item.order_id = order_id
-        db.session.add(item)
-        db.session.flush()  # Get item_id
-        
-        # Create order details for each quantity
-        for i in range(1, item.quantity + 1):
-            order_detail = OrderDetail(
-                item_id=item.item_id,
-                order_id=order_id,
-                product_id=item.product_id
-            )
-            db.session.add(order_detail)
-    
-    try:
-        db.session.commit()
-        return jsonify({
-            'message': 'Order created successfully',
-            'order_id': order_id
-        }), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': f'Error creating order: {str(e)}'}), 500
+        order_items.append({
+            'product_id': item['product_id'],
+            'model_id': item.get('model_id'),
+            'color_id': item.get('color_id'),
+            'quantity': item['quantity'],
+            'unit_price': unit_price,
+            'total_price': total_price
+        })
 
+        # Keep track of stock updates
+        if color:
+            color.stock_quantity -= item['quantity']
+            stock_updates.append(color)
+
+    # Calculate totals
+    discount_amount = (subtotal * data.get('discount_percent', 0)) / 100
+    tax_amount = ((subtotal - discount_amount) * data.get('tax_percent', 0)) / 100
+    total_amount = subtotal - discount_amount + tax_amount + data.get('delivery_charge', 0)
+
+    try:
+        # Get the next order_index value
+        max_order = db.session.query(db.func.max(Order.order_index)).scalar() or 0
+        next_order_index = max_order + 1
+        
+        # Current date for order_id generation
+        current_date = datetime.now()
+        current_year = current_date.year
+        
+        # Create and add order with explicit order_index
+        order = Order(
+            order_index=next_order_index,
+            offline_customer_id=customer.customer_id,
+            address_id=address.address_id,
+            total_items=len(order_items),
+            subtotal=subtotal,
+            discount_percent=data.get('discount_percent', 0),
+            delivery_charge=data.get('delivery_charge', 0),
+            tax_percent=data.get('tax_percent', 0),
+            total_amount=total_amount,
+            channel=data.get('channel', 'offline'),
+            payment_status=data.get('payment_status', 'paid'),
+            fulfillment_status=data.get('fulfillment_status', False),
+            delivery_status=data.get('delivery_status', 'intransit'),
+            delivery_method=data.get('delivery_method', 'shipping'),
+            created_at=current_date
+        )
+        
+        next_year = current_year + 1
+        next_year = str(next_year)
+        current_year = str(current_year)    
+        order.order_id = f"{current_year}{next_year[2:]}#{next_order_index}"
+        
+        db.session.add(order)
+        db.session.flush()  # Generate order_id
+
+        # Add order items
+        for item in order_items:
+            order_item = OrderItem(
+                order_id=order.order_id,
+                product_id=item['product_id'],
+                model_id=item.get('model_id'),
+                color_id=item.get('color_id'),
+                quantity=item['quantity'],
+                unit_price=item['unit_price'],
+                total_price=item['total_price']
+            )
+            db.session.add(order_item)
+            db.session.flush()  # Generate order_item.item_id
+
+            # Create order details for each quantity
+            for i in range(1, item['quantity'] + 1):
+                order_detail = OrderDetail(
+                    item_id=order_item.item_id,
+                    sr_no=i,
+                    order_id=order.order_id,
+                    product_id=item['product_id']
+                )
+                db.session.add(order_detail)
+
+        # Apply stock updates
+        for color in stock_updates:
+            db.session.add(color)
+            if color.stock_quantity <= color.threshold:
+                print(f"Warning: Product color {color.name} stock is below threshold ({color.stock_quantity}/{color.threshold})")
+
+        db.session.commit()
+
+        add_pickup_request(order.order_id)
+
+
+        return jsonify({
+            'message': 'Order created successfully', 
+            'order_id': order.order_id,
+            'timestamp': current_date.isoformat()
+        }), 201
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 
 
@@ -695,95 +682,108 @@ def place_order():
     tax_amount = ((subtotal - discount_amount) * tax_percent) / 100
     total_amount = subtotal - discount_amount + tax_amount + delivery_charge
     
-    # Generate new order ID
-    order_id = generate_order_id()
-    
-    # Create new order with custom ID
-    order = Order(
-        order_id=order_id,
-        customer_id=customer_id,
-        address_id=data['address_id'],
-        total_items=len(cart_items),
-        subtotal=subtotal,
-        discount_percent=discount_percent,
-        delivery_charge=delivery_charge,
-        tax_percent=tax_percent,
-        total_amount=total_amount,
-        channel='online',  # Hardcoded for this endpoint
-        payment_status=data['payment_status'],
-        fulfillment_status=False,
-        delivery_status='pending',
-        delivery_method=data['delivery_method'],
-        awb_number=data.get('awb_number'),
-        created_at=datetime.now()
-    )
-    
-    db.session.add(order)
-    
-    # Create order items from cart items and order details
-    order_items = []
-    for cart_item in cart_items:
-        # Get product and price information
-        product = Product.query.get(cart_item.product_id)
-        if not product:
-            db.session.rollback()
-            return jsonify({'error': f'Product not found: {cart_item.product_id}'}), 404
+    try:
+        # Get the next order_index value
+        # Method 1: Get the max order_index and increment it
+        max_order = db.session.query(db.func.max(Order.order_index)).scalar() or 0
+        next_order_index = max_order + 1
         
-        # Determine unit price
-        unit_price = 0
-        if cart_item.color_id:
-            color = ProductColor.query.get(cart_item.color_id)
-            if color:
-                unit_price = color.price
-                
-                # Update stock quantity
-                color.stock_quantity -= cart_item.quantity
-                if color.stock_quantity < 0:
-                    db.session.rollback()
-                    return jsonify({'error': f'Not enough stock for product {product.name}'}), 400
-        else:
-            unit_price = product.base_price
+        # Current date for order_id generation
+        current_date = datetime.now()
+        current_year = current_date.year
         
-        # Create order item
-        order_item = OrderItem(
-            order_id=order_id,
-            product_id=cart_item.product_id,
-            model_id=cart_item.model_id,
-            color_id=cart_item.color_id,
-            quantity=cart_item.quantity,
-            unit_price=unit_price,
-            total_price=cart_item.total_item_price
+        # Create new order with explicit order_index
+        order = Order(
+            order_index=next_order_index,  # Set the order_index explicitly
+            customer_id=customer_id,
+            address_id=data['address_id'],
+            total_items=len(cart_items),
+            subtotal=subtotal,
+            discount_percent=discount_percent,
+            delivery_charge=delivery_charge,
+            tax_percent=tax_percent,
+            total_amount=total_amount,
+            channel='online',  # Hardcoded for this endpoint
+            payment_status=data['payment_status'],
+            fulfillment_status=False,
+            delivery_status='pending',
+            delivery_method=data['delivery_method'],
+            awb_number=data.get('awb_number'),
+            created_at=current_date
         )
         
-        db.session.add(order_item)
-        db.session.flush()  # Get item_id
+        # Manually set the order_id with the expected format (do not rely on __init__)
+        next_year = current_year + 1
+        next_year = str(next_year)
+        current_year = str(current_year)    
+        order.order_id = f"{current_year}{next_year[2:]}#{next_order_index}"
         
-        # Create order details for each quantity
-        for i in range(1, cart_item.quantity + 1):
-            order_detail = OrderDetail(
-                item_id=order_item.item_id,
-                order_id=order_id,
-                product_id=cart_item.product_id
+        db.session.add(order)
+        db.session.flush()
+        
+        # Create order items from cart items and order details
+        order_items = []
+        for cart_item in cart_items:
+            # Get product and price information
+            product = Product.query.get(cart_item.product_id)
+            if not product:
+                db.session.rollback()
+                return jsonify({'error': f'Product not found: {cart_item.product_id}'}), 404
+            
+            # Determine unit price
+            unit_price = 0
+            if cart_item.color_id:
+                color = ProductColor.query.get(cart_item.color_id)
+                if color:
+                    unit_price = color.price
+                    
+                    # Update stock quantity
+                    color.stock_quantity -= cart_item.quantity
+                    if color.stock_quantity < 0:
+                        db.session.rollback()
+                        return jsonify({'error': f'Not enough stock for product {product.name}'}), 400
+            else:
+                unit_price = product.base_price
+            
+            # Create order item
+            order_item = OrderItem(
+                order_id=order.order_id,
+                product_id=cart_item.product_id,
+                model_id=cart_item.model_id,
+                color_id=cart_item.color_id,
+                quantity=cart_item.quantity,
+                unit_price=unit_price,
+                total_price=cart_item.total_item_price
             )
-            db.session.add(order_detail)
+            
+            db.session.add(order_item)
+            db.session.flush()  # Get item_id
+            
+            # Create order details for each quantity
+            for i in range(1, cart_item.quantity + 1):
+                order_detail = OrderDetail(
+                    item_id=order_item.item_id,
+                    order_id=order.order_id,
+                    product_id=cart_item.product_id
+                )
+                db.session.add(order_detail)
+            
+            order_items.append(order_item)
         
-        order_items.append(order_item)
-    
-    # Clear cart items
-    for item in cart_items:
-        db.session.delete(item)
-    
-    # Reset cart total
-    cart.total_cart_price = 0
-    
-    try:
+        # Clear cart items
+        for item in cart_items:
+            db.session.delete(item)
+        
+        # Reset cart total
+        cart.total_cart_price = 0
+        
         db.session.commit()
         
         return jsonify({
             'success': True,
             'message': 'Order placed successfully',
             'order': {
-                'order_id': order_id,
+                'order_id': order.order_id,
                 'customer_id': customer_id,
                 'total_items': order.total_items,
                 'subtotal': float(order.subtotal),
@@ -807,8 +807,6 @@ def place_order():
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': f'Error creating order: {str(e)}'}), 500
-
-
 
 
 
@@ -858,7 +856,7 @@ def get_order_items_expanded(order_id):
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
     
 
-# ADMIN ORDERS 
+
 @order_bp.route('/orders/<string:order_id>/details-expanded', methods=['GET'])
 def get_order_details_expanded(order_id):
     try:
@@ -1019,82 +1017,7 @@ def save_serial_numbers():
             'error': 'Failed to save serial numbers',
             'details': str(e)
         }), 500
-
-
-# USER ORDERS 
-@order_bp.route('/customer/<int:customer_id>/orders', methods=['GET'])
-def get_customer_orders(customer_id):
-    """Get all orders for a specific customer"""
-    try:
-        # Get both online and offline orders for this customer
-        orders = Order.query.filter(
-            (Order.customer_id == customer_id) | 
-            (Order.offline_customer_id == customer_id)
-        ).order_by(Order.created_at.desc()).all()
-
-        if not orders:
-            return jsonify({'message': 'No orders found for this customer'}), 404
-
-        return jsonify([{
-            'order_id': order.order_id,
-            'total_amount': float(order.total_amount),
-            'payment_status': order.payment_status,
-            'delivery_status': order.delivery_status,
-            'created_at': order.created_at.isoformat(),
-            'item_count': order.total_items
-        } for order in orders])
     
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-
-@order_bp.route('/order/<path:order_id>/items', methods=['GET'])
-def get_order_items(order_id):
-    """Get all items for a specific order with complete details"""
-    try:
-        # No need to unquote since Flask handles path conversion
-        print(f"Looking for order: {order_id}")  # Debug log
-        
-        # Find exact match (including special characters)
-        order = Order.query.filter_by(order_id=order_id).first()
-        
-        if not order:
-            print(f"Order not found. Existing orders: {[o.order_id for o in Order.query.limit(10).all()]}")
-            return jsonify({'message': 'Order not found'}), 404
-
-        items = []
-        for item in order.items:
-            product = Product.query.get(item.product_id)
-            product_image = product.images[0].image_url if product and product.images else None
-            
-            items.append({
-                'product_id': item.product_id,
-                'product_name': product.name if product else f"Product {item.product_id}",
-                'product_image': product_image,
-                'model': item.model.name if item.model else None,
-                'color': item.color.name if item.color else None,
-                'quantity': item.quantity,
-                'unit_price': float(item.unit_price),
-                'total_price': float(item.total_price),
-                'serial_numbers': [sn.sr_number for sn in item.serial_numbers]
-            })
-
-        return jsonify({
-            'order_id': order.order_id,
-            'customer_id': order.customer_id or order.offline_customer_id,
-            'created_at': order.created_at.isoformat(),
-            'items': items,
-            'delivery_status': order.delivery_status,
-            'payment_status': order.payment_status,
-            'total_amount': float(order.total_amount),
-            'total_items': order.total_items
-        })
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 
 @order_bp.route('/order/add-to-order', methods=['POST'])
 @token_required(roles=['customer'])
@@ -1119,9 +1042,12 @@ def add_to_order():
     # Optional fields with defaults
     model_id = data.get('model_id')
     color_id = data.get('color_id')
-    discount_percent = data.get('discount_percent', 0)
-    tax_percent = data.get('tax_percent', 0)
-    delivery_charge = data.get('delivery_charge', 0)
+    from decimal import Decimal
+
+    discount_percent = Decimal(str(data.get('discount_percent', 0)))
+    tax_percent = Decimal(str(data.get('tax_percent', 0)))
+    delivery_charge = Decimal(str(data.get('delivery_charge', 0)))
+
     
     # Get customer ID from token
     customer_id = request.current_user.customer_id
@@ -1268,4 +1194,235 @@ def add_to_order():
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': f'Error creating order: {str(e)}'}), 500
+    
 
+
+@order_bp.route('/customer/<int:customer_id>/orders', methods=['GET'])
+def get_customer_orders(customer_id):
+    """Get all orders for a specific customer"""
+    try:
+        # Get both online and offline orders for this customer
+        orders = Order.query.filter(
+            (Order.customer_id == customer_id) | 
+            (Order.offline_customer_id == customer_id)
+        ).order_by(Order.created_at.desc()).all()
+
+        if not orders:
+            return jsonify({'message': 'No orders found for this customer'}), 404
+
+        return jsonify([{
+            'order_id': order.order_id,
+            'total_amount': float(order.total_amount),
+            'payment_status': order.payment_status,
+            'delivery_status': order.delivery_status,
+            'created_at': order.created_at.isoformat(),
+            'item_count': order.total_items
+        } for order in orders])
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
+@order_bp.route('/order/<path:order_id>/items', methods=['GET'])
+def get_order_items(order_id):
+    """Get all items for a specific order with complete details"""
+    try:
+        # No need to unquote since Flask handles path conversion
+        print(f"Looking for order: {order_id}")  # Debug log
+        
+        # Find exact match (including special characters)
+        order = Order.query.filter_by(order_id=order_id).first()
+        
+        if not order:
+            print(f"Order not found. Existing orders: {[o.order_id for o in Order.query.limit(10).all()]}")
+            return jsonify({'message': 'Order not found'}), 404
+
+        items = []
+        for item in order.items:
+            product = Product.query.get(item.product_id)
+            product_image = product.images[0].image_url if product and product.images else None
+            
+            items.append({
+                'product_id': item.product_id,
+                'product_name': product.name if product else f"Product {item.product_id}",
+                'product_image': product_image,
+                'model': item.model.name if item.model else None,
+                'color': item.color.name if item.color else None,
+                'quantity': item.quantity,
+                'unit_price': float(item.unit_price),
+                'total_price': float(item.total_price),
+                'serial_numbers': [sn.sr_number for sn in item.serial_numbers]
+            })
+
+        return jsonify({
+            'order_id': order.order_id,
+            'customer_id': order.customer_id or order.offline_customer_id,
+            'created_at': order.created_at.isoformat(),
+            'items': items,
+            'delivery_status': order.delivery_status,
+            'payment_status': order.payment_status,
+            'total_amount': float(order.total_amount),
+            'total_items': order.total_items
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
+@order_bp.route('/order/<string:order_id>/add-pickup-req', methods=['PUT'])
+@token_required(roles=['admin'])      
+def add_pickup_request(order_id):
+    """Add a pickup request for an order to Delhivery API
+    
+    Takes an order ID and creates a pickup request with the Delhivery API
+    """
+    try:
+        print(order_id)
+        order = Order.query.filter_by(order_id=order_id).first()
+        
+        if not order:
+            return jsonify({'error': 'Order not found'}), 404
+            
+        # Get order address information
+        address = Address.query.filter_by(address_id=order.address_id).first()
+        if not address:
+            return jsonify({'error': 'Order address not found'}), 404
+            
+        # Get customer information
+        customer = None
+        if order.customer_id:
+            customer = Customer.query.filter_by(customer_id=order.customer_id).first()
+        elif order.offline_customer_id:
+            customer = OfflineCustomer.query.filter_by(customer_id=order.offline_customer_id).first()
+            
+        if not customer:
+            return jsonify({'error': 'Customer not found'}), 404
+            
+        # Get state information
+        state = address.state
+        if not state:
+            return jsonify({'error': 'State information not found'}), 404
+            
+        # Calculate total weight and build product description
+        total_weight = 0.0
+        products_desc = []
+        
+        for item in order.items:
+            # Assuming each product might have a weight attribute, if not you'll need to modify this
+            product_weight = getattr(item.product, 'weight', 0.5)  # Default to 0.5 kg if not specified
+            total_weight += product_weight * item.quantity
+            
+            # Build product description
+            product_name = item.product.name if hasattr(item.product, 'name') else f"Product #{item.product_id}"
+            products_desc.append(f"{product_name} x{item.quantity}")
+        
+        # Format the shipment data for Delhivery API
+        shipment_data = {
+            "name": address.name,
+            "add": f"{address.address_line}, {address.locality}",
+            "city": address.city,
+            "pin": address.pincode,
+            "state": state.name if hasattr(state, 'name') else "",
+            "country": "India",
+            "phone": address.mobile,
+            "order": order_id,
+            "payment_mode": "Prepaid" if order.payment_status == "paid" else "COD",
+            "total_amount": float(order.total_amount),
+            "cod_amount": 0 if order.payment_status == "paid" else float(order.total_amount),
+            "weight": total_weight,
+            "shipment_width": 10,
+            "shipment_height": 10,
+            "shipment_length": 10,
+            "waybill": order.awb_number or "",
+            "products_desc": ", ".join(products_desc)
+        }
+        
+        # Prepare the full request payload for Delhivery API
+        payload = {
+            "pickup_location": {
+                "name": "mTm2",
+                "add": "Address Line",
+                "city": "City",
+                "state": "State",
+                "country": "India",
+                "pin": "110001",
+                "phone": "9999999999"
+            },
+            "shipments": [shipment_data]
+        }
+        
+        # Send request to Delhivery API
+        DELHIVERY_KEY = os.getenv("DELHIVERY_KEY")
+        url = "https://track.delhivery.com/api/cmu/create.json"
+        headers = {
+            "Authorization": "Token "+DELHIVERY_KEY
+        }
+
+        response = requests.post(
+            url,
+            headers=headers,
+            data={
+                'data': json.dumps(payload),
+                'format': 'json'  # ✅ Important to add this
+            }
+        )
+
+        if response.status_code != 200:
+            return jsonify({'error': 'Failed to create pickup request', 'details': response.text}), response.status_code
+
+        response_data = response.json()
+        
+        # Update the order with waybill, upload_wbn and fulfillment_status
+        try:
+            if 'waybill' in response_data['packages'][0]:
+                order.awb_number = response_data['packages'][0].get('waybill')
+            
+            if 'upload_wbn' in response_data:
+                order.upload_wbn = response_data['upload_wbn']
+                
+            # Set delivery status to processing and fulfillment status to True
+            order.delivery_status = 'processing'
+            order.fulfillment_status = True  # This is the key change you wanted
+            
+            # Save changes to database
+            db.session.commit()
+            
+            return jsonify({
+                'message': 'Pickup request created successfully',
+                'order_id': order.order_id,
+                'waybill': order.awb_number,
+                'upload_wbn': order.upload_wbn,
+                'fulfillment_status': True,  # Added to response
+                'response': response_data
+            }), 200
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'Failed to update order: {str(e)}'}), 500
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+
+@order_bp.route('/order/<path:order_id>/track',methods=['GET'])
+@token_required(roles=['customer'])
+def track_order(order_id):
+
+       try:
+           order = Order.query.filter_by(order_id=order_id).first()
+           if not order:
+               return jsonify({'error': 'Order not found'}), 404
+           waybill=order.awb_number
+           if not waybill:
+               return jsonify({'error': 'Waybill not found'}), 404
+           # Call the API to track the order
+           
+           DELHIVERY_KEY = os.getenv("DELHIVERY_KEY")
+           url = f"https://track.delhivery.com/api/v1/packages/json/?waybill={waybill}&token={DELHIVERY_KEY}"
+
+           response = requests.get(url)
+           response.raise_for_status()  # Raises HTTPError for bad responses (4xx/5xx)
+           return response.json()
+       except requests.exceptions.RequestException as e:
+        return {'error': str(e)}
