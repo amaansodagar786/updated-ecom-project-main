@@ -13,6 +13,14 @@ from datetime import datetime
 import os
 import requests
 import json
+import smtplib
+from email.mime.text import MIMEText
+
+# Email configuration (replace with your SMTP details)
+SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
+SMTP_USERNAME = os.getenv('SMTP_USERNAME', 'sodagaramaan786@gmail.com')
+SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', 'gsin qzbq xuqw qihp')
 
 
 from middlewares.auth import token_required
@@ -435,11 +443,8 @@ def clear_cart():
 
 
 
-
-
 @order_bp.route('/orders', methods=['GET'])
 def get_orders():
-
     orders = Order.query.order_by(Order.created_at.desc()).all()
 
     return jsonify([{
@@ -462,7 +467,8 @@ def get_orders():
             'alternate_phone': order.address.alternate_phone,
             'address_type': order.address.address_type,
             'latitude': order.address.latitude,
-            'longitude': order.address.longitude
+            'longitude': order.address.longitude,
+            'is_available': order.address.is_available
         },
         'total_items': order.total_items,
         'subtotal': float(order.subtotal),
@@ -476,6 +482,7 @@ def get_orders():
         'delivery_status': order.delivery_status,
         'delivery_method': order.delivery_method,
         'awb_number': order.awb_number,
+        'order_status': order.order_status,  # ✅ Added this line
         'created_at': order.created_at.isoformat(),
         'items': [{
             'product_id': item.product_id,
@@ -489,6 +496,144 @@ def get_orders():
     } for order in orders])
 
 
+
+
+# @order_bp.route('/orders', methods=['POST'])
+# @token_required(roles=['admin'])
+# def create_order():
+#     data = request.get_json()
+
+#     # Validate customer
+#     customer = OfflineCustomer.query.get(data.get('customer_id'))
+#     if not customer:
+#         return jsonify({'error': 'Customer not found'}), 404
+
+#     # Get customer's default address
+#     address = Address.query.filter_by(offline_customer_id=customer.customer_id).first()
+#     if not address:
+#         return jsonify({'error': 'No address found for customer'}), 404
+
+#     subtotal = 0
+#     order_items = []
+#     stock_updates = []
+
+#     # Prepare order items and check stock
+#     for item in data.get('items', []):
+#         product = Product.query.get(item['product_id'])
+#         if not product:
+#             return jsonify({'error': f"Product {item['product_id']} not found"}), 404
+
+#         color = ProductColor.query.get(item.get('color_id')) if item.get('color_id') else None
+#         model = ProductModel.query.get(item.get('model_id')) if item.get('model_id') else None
+
+#         if color and color.stock_quantity < item['quantity']:
+#             return jsonify({
+#                 'error': f"Not enough stock for color '{color.name}'. Available: {color.stock_quantity}"
+#             }), 400
+
+#         unit_price = color.price
+#         total_price = unit_price * item['quantity']
+#         subtotal += total_price
+
+#         order_items.append({
+#             'product_id': item['product_id'],
+#             'model_id': item.get('model_id'),
+#             'color_id': item.get('color_id'),
+#             'quantity': item['quantity'],
+#             'unit_price': unit_price,
+#             'total_price': total_price
+#         })
+
+#         # Keep track of stock updates
+#         if color:
+#             color.stock_quantity -= item['quantity']
+#             stock_updates.append(color)
+
+#     # Calculate totals
+#     discount_amount = (subtotal * data.get('discount_percent', 0)) / 100
+#     tax_amount = ((subtotal - discount_amount) * data.get('tax_percent', 0)) / 100
+#     total_amount = subtotal - discount_amount + tax_amount + data.get('delivery_charge', 0)
+
+#     try:
+#         # Get the next order_index value
+#         max_order = db.session.query(db.func.max(Order.order_index)).scalar() or 0
+#         next_order_index = max_order + 1
+        
+#         # Current date for order_id generation
+#         current_date = datetime.now()
+#         current_year = current_date.year
+        
+#         # Create and add order with explicit order_index
+#         order = Order(
+#             order_index=next_order_index,
+#             offline_customer_id=customer.customer_id,
+#             address_id=address.address_id,
+#             total_items=len(order_items),
+#             subtotal=subtotal,
+#             discount_percent=data.get('discount_percent', 0),
+#             delivery_charge=data.get('delivery_charge', 0),
+#             tax_percent=data.get('tax_percent', 0),
+#             total_amount=total_amount,
+#             channel=data.get('channel', 'offline'),
+#             payment_status=data.get('payment_status', 'paid'),
+#             fulfillment_status=data.get('fulfillment_status', False),
+#             delivery_status=data.get('delivery_status', 'intransit'),
+#             delivery_method=data.get('delivery_method', 'shipping'),
+#             created_at=current_date
+#         )
+        
+#         next_year = current_year + 1
+#         next_year = str(next_year)
+#         current_year = str(current_year)    
+#         order.order_id = f"{current_year}{next_year[2:]}#{next_order_index}"
+        
+#         db.session.add(order)
+#         db.session.flush()  # Generate order_id
+
+#         # Add order items
+#         for item in order_items:
+#             order_item = OrderItem(
+#                 order_id=order.order_id,
+#                 product_id=item['product_id'],
+#                 model_id=item.get('model_id'),
+#                 color_id=item.get('color_id'),
+#                 quantity=item['quantity'],
+#                 unit_price=item['unit_price'],
+#                 total_price=item['total_price']
+#             )
+#             db.session.add(order_item)
+#             db.session.flush()  # Generate order_item.item_id
+
+#             # Create order details for each quantity
+#             for i in range(1, item['quantity'] + 1):
+#                 order_detail = OrderDetail(
+#                     item_id=order_item.item_id,
+#                     sr_no=i,
+#                     order_id=order.order_id,
+#                     product_id=item['product_id']
+#                 )
+#                 db.session.add(order_detail)
+
+#         # Apply stock updates
+#         for color in stock_updates:
+#             db.session.add(color)
+#             if color.stock_quantity <= color.threshold:
+#                 print(f"Warning: Product color {color.name} stock is below threshold ({color.stock_quantity}/{color.threshold})")
+
+#         db.session.commit()
+
+#         add_pickup_request(order.order_id)
+
+
+#         return jsonify({
+#             'message': 'Order created successfully', 
+#             'order_id': order.order_id,
+#             'timestamp': current_date.isoformat()
+#         }), 201
+
+#     except SQLAlchemyError as e:
+#         db.session.rollback()
+#         return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 
 @order_bp.route('/orders', methods=['POST'])
@@ -568,7 +713,8 @@ def create_order():
             tax_percent=data.get('tax_percent', 0),
             total_amount=total_amount,
             channel=data.get('channel', 'offline'),
-            payment_status=data.get('payment_status', 'paid'),
+            payment_status='pending',
+            order_status='APPROVED',
             fulfillment_status=data.get('fulfillment_status', False),
             delivery_status=data.get('delivery_status', 'intransit'),
             delivery_method=data.get('delivery_method', 'shipping'),
@@ -594,18 +740,18 @@ def create_order():
                 unit_price=item['unit_price'],
                 total_price=item['total_price']
             )
+            
             db.session.add(order_item)
             db.session.flush()  # Generate order_item.item_id
 
-            # Create order details for each quantity
-            for i in range(1, item['quantity'] + 1):
+            for i in range(1, order_item.quantity + 1):
                 order_detail = OrderDetail(
                     item_id=order_item.item_id,
-                    sr_no=i,
                     order_id=order.order_id,
-                    product_id=item['product_id']
+                    product_id=order_item.product_id
                 )
                 db.session.add(order_detail)
+            
 
         # Apply stock updates
         for color in stock_updates:
@@ -615,7 +761,6 @@ def create_order():
 
         db.session.commit()
 
-        add_pickup_request(order.order_id)
 
 
         return jsonify({
@@ -627,6 +772,8 @@ def create_order():
     except SQLAlchemyError as e:
         db.session.rollback()
         return jsonify({'error': f'Database error: {str(e)}'}), 500
+
+
 
 
 
@@ -778,6 +925,37 @@ def place_order():
         cart.total_cart_price = 0
         
         db.session.commit()
+
+
+        try:
+            subject = f"New Order Placed: {order.order_id}"
+            body = f"""
+            A new order has been placed with the following details:
+            
+            Order ID: {order.order_id}
+            Customer ID: {customer_id}
+            Total Items: {order.total_items}
+            Subtotal: {order.subtotal}
+            Total Amount: {order.total_amount}
+            Payment Status: {order.payment_status}
+            Delivery Method: {order.delivery_method}
+            
+            Please review the order in the admin panel.
+            """
+            
+            msg = MIMEText(body)
+            msg['Subject'] = subject
+            msg['From'] = SMTP_USERNAME
+            msg['To'] = 'sodagaramaan78692@gmail.com'
+            
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                server.starttls()
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.send_message(msg)
+        except Exception as email_error:
+            print(f"Failed to send admin notification email: {email_error}")
+            # Don't fail the order if email fails
+        
         
         return jsonify({
             'success': True,
@@ -856,7 +1034,6 @@ def get_order_items_expanded(order_id):
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
     
 
-
 @order_bp.route('/orders/<string:order_id>/details-expanded', methods=['GET'])
 def get_order_details_expanded(order_id):
     try:
@@ -888,13 +1065,39 @@ def get_order_details_expanded(order_id):
                 'model_name': model_name,
                 'color_name': color_name,
                 'unit_price': float(order_item.unit_price) if order_item else 0,
-                'status': getattr(detail, 'status', None),  # Safely get status if it exists
+                'status': getattr(detail, 'status', None),
                 'created_at': detail.created_at.isoformat() if hasattr(detail, 'created_at') and detail.created_at else None
             })
+        
+        # Include address information like in the /orders endpoint
+        address_data = None
+        if order.address:
+            address_data = {
+                'address_id': order.address.address_id,
+                'name': order.address.name,
+                'mobile': order.address.mobile,
+                'pincode': order.address.pincode,
+                'locality': order.address.locality,
+                'address_line': order.address.address_line,
+                'city': order.address.city,
+                'state': {
+                    'state_id': order.address.state.state_id,
+                    'name': order.address.state.name,
+                    'abbreviation': order.address.state.abbreviation
+                },
+                'landmark': order.address.landmark,
+                'alternate_phone': order.address.alternate_phone,
+                'address_type': order.address.address_type,
+                'latitude': order.address.latitude,
+                'longitude': order.address.longitude,
+                'is_available': order.address.is_available  # ✅ Make sure this is included
+            }
         
         return jsonify({
             'order_id': order.order_id,
             'customer_id': order.customer_id,
+            'offline_customer_id': order.offline_customer_id,
+            'customer_type': 'offline' if order.offline_customer_id else 'online',
             'total_details': len(expanded_details),
             'subtotal': float(order.subtotal),
             'total_amount': float(order.total_amount),
@@ -902,10 +1105,13 @@ def get_order_details_expanded(order_id):
             'fulfillment_status': order.fulfillment_status,
             'delivery_status': order.delivery_status,
             'created_at': order.created_at.isoformat(),
+            'awb_number': order.awb_number,
+            'upload_wbn': order.upload_wbn,
+            'address': address_data,
             'details': expanded_details
         })
+
     except Exception as e:
-        # Log the error for debugging
         print(f"Error in get_order_details_expanded: {str(e)}")
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
 
@@ -1165,6 +1371,36 @@ def add_to_order():
                     return jsonify({'error': f'Not enough stock for product {product.name}'}), 400
         
         db.session.commit()
+
+
+        # Send email notification to admin after successful order placement
+        try:
+            subject = f"New Direct Order Placed: {order.order_id}"
+            body = f"""
+            A new direct order has been placed with the following details:
+            
+            Order ID: {order.order_id}
+            Customer ID: {customer_id}
+            Product ID: {data['product_id']}
+            Quantity: {data['quantity']}
+            Total Amount: {order.total_amount}
+            Payment Status: {order.payment_status}
+            Delivery Method: {order.delivery_method}
+            
+            Please review the order in the admin panel.
+            """
+            
+            msg = MIMEText(body)
+            msg['Subject'] = subject
+            msg['From'] = SMTP_USERNAME
+            msg['To'] = 'meetkoladiya6753@gmail.com'
+            
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                server.starttls()
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.send_message(msg)
+        except Exception as email_error:
+            print(f"Failed to send admin notification email: {email_error}")
         
         return jsonify({
             'success': True,
@@ -1426,3 +1662,123 @@ def track_order(order_id):
            return response.json()
        except requests.exceptions.RequestException as e:
         return {'error': str(e)}
+       
+
+
+@order_bp.route('/approve-order/<string:order_id>', methods=['GET'])
+@token_required(roles=['admin'])
+def approve_order(order_id):
+    try:
+        order = Order.query.filter_by(order_id=order_id).first()
+        if not order:
+            return jsonify({'error': 'Order not found'}), 404
+        
+        # Get customer email
+        customer = None
+        if order.customer_id:
+            customer = Customer.query.get(order.customer_id)
+        elif order.offline_customer_id:
+            # Handle offline customer if needed
+            pass
+            
+        if not customer:
+            return jsonify({'error': 'Customer not found'}), 404
+        
+        order.order_status = "APPROVED"
+        db.session.commit()
+        
+        # Send approval email to customer
+        try:
+            subject = f"Your Order #{order_id} Has Been Approved"
+            body = f"""
+            Dear {customer.name},
+            
+            We're pleased to inform you that your order #{order_id} has been approved and is being processed.
+            
+            Order Details:
+            - Order ID: {order_id}
+            - Total Amount: {order.total_amount}
+            - Status: Approved
+            
+            Thank you for shopping with us!
+            
+            Best regards,
+            Your Store Team
+            """
+            
+            msg = MIMEText(body)
+            msg['Subject'] = subject
+            msg['From'] = SMTP_USERNAME
+            msg['To'] = customer.email
+            
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                server.starttls()
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.send_message(msg)
+        except Exception as email_error:
+            print(f"Failed to send approval email: {email_error}")
+            # Continue even if email fails
+        
+        return jsonify({'message': 'Order approved successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@order_bp.route('/reject-order/<string:order_id>', methods=['DELETE'])
+@token_required(roles=['admin'])
+def reject_order(order_id):
+    try:
+        order = Order.query.filter_by(order_id=order_id).first()
+        if not order:
+            return jsonify({'error': 'Order not found'}), 404
+
+        # Get customer email before deleting
+        customer = None
+        if order.customer_id:
+            customer = Customer.query.get(order.customer_id)
+        elif order.offline_customer_id:
+            # Handle offline customer if needed
+            pass
+            
+        if not customer:
+            return jsonify({'error': 'Customer not found'}), 404
+
+        db.session.delete(order)
+        db.session.commit()
+
+        # Send rejection email to customer
+        try:
+            subject = f"Your Order #{order_id} Has Been Rejected"
+            body = f"""
+            Dear {customer.name},
+            
+            We regret to inform you that your order #{order_id} has been rejected.
+            
+            Order Details:
+            - Order ID: {order_id}
+            - Total Amount: {order.total_amount}
+            - Status: Rejected
+            
+            If you believe this was a mistake or have any questions, please contact our support team.
+            
+            Best regards,
+            Your Store Team
+            """
+            
+            msg = MIMEText(body)
+            msg['Subject'] = subject
+            msg['From'] = SMTP_USERNAME
+            msg['To'] = customer.email
+            
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                server.starttls()
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.send_message(msg)
+        except Exception as email_error:
+            print(f"Failed to send rejection email: {email_error}")
+            # Continue even if email fails
+
+        return jsonify({'message': 'Order deleted (rejected) successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
