@@ -21,6 +21,7 @@ from routes.deviceinfo import device_transaction_bp #new import
 from apscheduler.schedulers.background import BackgroundScheduler 
 from services.stock_notifier import check_and_notify  # Import from services folder
 from routes.review import reviews_bp
+from routes.admindash import admin_bp
 
 
 
@@ -119,6 +120,7 @@ app.register_blueprint(offline_customer_bp)
 app.register_blueprint(forgotpass_bp) #new import
 app.register_blueprint(device_transaction_bp) #new import
 app.register_blueprint(reviews_bp)
+app.register_blueprint(admin_bp)
 
 
 @app.after_request
