@@ -116,7 +116,6 @@ app.register_blueprint(profile_bp)
 app.register_blueprint(state_bp)
 app.register_blueprint(address_bp)
 app.register_blueprint(offline_customer_bp)
-# Add this with other blueprint registrations
 app.register_blueprint(forgotpass_bp) #new import
 app.register_blueprint(device_transaction_bp) #new import
 app.register_blueprint(reviews_bp)
@@ -158,9 +157,9 @@ if __name__ == '__main__':
 
          # Setup Scheduler
         scheduler = BackgroundScheduler()
-        scheduler.add_job(func=check_and_notify, trigger="interval", minutes=400)
+        scheduler.add_job(func=check_and_notify, trigger="interval", days=1)
         scheduler.start()
-        print("📅 Background Scheduler Started (Every 400 minutes)")
+        print("📅 Background Scheduler Started (Every 1 day)")
     
     # Run the app
     app.run(debug=True)

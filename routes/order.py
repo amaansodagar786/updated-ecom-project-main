@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from models.order import Order,OrderItem,OrderDetail , OrderStatusHistory
+from models.order import Order,OrderItem,OrderDetail, OrderStatusHistory
 from models.customer import Customer
 from models.offline_customer import OfflineCustomer
 from models.cart import Cart,CartItem
@@ -13,8 +13,13 @@ from datetime import datetime
 import os
 import requests
 import json
+from werkzeug.exceptions import BadRequest
 import smtplib
+from middlewares.Calculate_delivery_charge import calculateDelivery
 from email.mime.text import MIMEText
+from zoneinfo import ZoneInfo
+from decimal import Decimal
+
 
 # Email configuration (replace with your SMTP details)
 SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
@@ -447,7 +452,7 @@ def clear_cart():
 
 @order_bp.route('/orders', methods=['GET'])
 def get_orders():
-    orders = Order.query.filter(Order.order_status != "REJECTED").order_by(Order.created_at.desc()).all()
+    orders = Order.query.order_by(Order.created_at.desc()).all()
 
     return jsonify([{
         'order_id': order.order_id,
@@ -593,6 +598,7 @@ def create_order():
 
         unit_price = color.price
         total_price = unit_price * item['quantity']
+
         subtotal += total_price
 
         order_items.append({
@@ -609,10 +615,17 @@ def create_order():
             color.stock_quantity -= item['quantity']
             stock_updates.append(color)
 
-    # Calculate totals
+    #Calculate totals
     discount_amount = (subtotal * data.get('discount_percent', 0)) / 100
-    tax_amount = ((subtotal - discount_amount) * data.get('tax_percent', 0)) / 100
-    total_amount = subtotal - discount_amount + tax_amount + data.get('delivery_charge', 0)
+
+    delivery_charge=calculateDelivery(subtotal)
+    
+    #remove tax_amt
+    total_amount = subtotal - discount_amount  + delivery_charge
+
+    gst=subtotal-(subtotal/1.18)
+    subtotal-=gst
+
 
     try:
         # Get the next order_index value
@@ -620,7 +633,7 @@ def create_order():
         next_order_index = max_order + 1
         
         # Current date for order_id generation
-        current_date = datetime.now()
+        current_date = datetime.now(tz=ZoneInfo('Asia/Kolkata'))
         current_year = current_date.year
         
         # Create and add order with explicit order_index
@@ -631,9 +644,10 @@ def create_order():
             total_items=len(order_items),
             subtotal=subtotal,
             discount_percent=data.get('discount_percent', 0),
-            delivery_charge=data.get('delivery_charge', 0),
+            delivery_charge=delivery_charge,
             tax_percent=data.get('tax_percent', 0),
             total_amount=total_amount,
+            gst=gst,
             channel=data.get('channel', 'offline'),
             payment_status='pending',
             order_status='APPROVED',
@@ -742,15 +756,16 @@ def place_order():
                 }), 400
     
     # Calculate order totals
-    subtotal = float(cart.total_cart_price)
-    discount_percent = data.get('discount_percent', 0)
-    tax_percent = data.get('tax_percent', 0)
-    delivery_charge = data.get('delivery_charge', 0)
+    # subtotal=cart.get('total_cart_price')
+    subtotal=cart.total_cart_price
+    discount_amount = (subtotal * data.get('discount_percent', 0)) / 100
+
+    delivery_charge=calculateDelivery(subtotal)
+    total_amount = subtotal - discount_amount  + delivery_charge
+
+    gst = subtotal - (subtotal / Decimal('1.18'))    
+    subtotal-=gst
     
-    # Calculate final amount
-    discount_amount = (subtotal * discount_percent) / 100
-    tax_amount = ((subtotal - discount_amount) * tax_percent) / 100
-    total_amount = subtotal - discount_amount + tax_amount + delivery_charge
     
     try:
         # Get the next order_index value
@@ -759,7 +774,7 @@ def place_order():
         next_order_index = max_order + 1
         
         # Current date for order_id generation
-        current_date = datetime.now()
+        current_date = datetime.now(tz=ZoneInfo('Asia/Kolkata'))
         current_year = current_date.year
         
         # Create new order with explicit order_index
@@ -769,10 +784,11 @@ def place_order():
             address_id=data['address_id'],
             total_items=len(cart_items),
             subtotal=subtotal,
-            discount_percent=discount_percent,
+            discount_percent=data.get('discount_percent' , 0),
             delivery_charge=delivery_charge,
-            tax_percent=tax_percent,
+            tax_percent=data.get('tax_percent', 0),
             total_amount=total_amount,
+            gst=gst,
             channel='online',  # Hardcoded for this endpoint
             payment_status=data['payment_status'],
             payment_type=data.get('payment_type', 'cod'),
@@ -1048,77 +1064,148 @@ def get_order_details_expanded(order_id):
 
 
 
-@order_bp.route('/orders/save-sr-numbers', methods=['POST'])
-def save_serial_numbers():
+# @order_bp.route('/orders/save-sr-numbers', methods=['POST'])
+# def save_serial_numbers():
+#     try:
+#         data = request.get_json()
+        
+#         # Validate request data
+#         if not data or not isinstance(data, list):
+#             return jsonify({'error': 'Invalid request data format'}), 400
+        
+#         # Get order details first to get order information
+#         order_details = []
+#         for sr_data in data:
+#             detail = OrderDetail.query.get(sr_data['detail_id'])
+#             if not detail:
+#                 continue
+#             order_details.append(detail)
+        
+#         if not order_details:
+#             return jsonify({'error': 'No valid order details found'}), 400
+        
+#         # Get the order from the first detail (all details should belong to the same order)
+#         order = order_details[0].order
+
+#         # Fallback SKU settings
+#         sku_prefix = 'sku'
+#         fallback_sku_counter = 123  # Starting point for fallback SKUs
+
+#         # Process each serial number
+#         for index, (sr_data, detail) in enumerate(zip(data, order_details)):
+#             sr_no = sr_data.get('sr_no')
+#             if not sr_no:
+#                 continue  # Skip if no SR number provided
+                
+#             # Update the SR number in OrderDetail
+#             detail.sr_no = sr_no
+#             db.session.add(detail)
+
+#             # Determine the SKU (with fallback)
+#             if detail.item and hasattr(detail.item, 'sku') and detail.item.sku:
+#                 sku_id = detail.item.sku
+#             else:
+#                 sku_id = f"{sku_prefix}{fallback_sku_counter + index}"
+
+#             # Create OUT transaction for this device
+            # transaction = DeviceTransaction(
+            #     device_srno=sr_no,
+            #     device_name=detail.item.product.name if detail.item and detail.item.product else 'Unknown Device',
+            #     sku_id=sku_id,
+            #     order_id=order.order_id,
+            #     in_out=2,  # OUT transaction
+            #     create_date=datetime.now(tz=ZoneInfo('Asia/Kolkata')),
+            #     price=float(detail.item.unit_price) if detail.item and hasattr(detail.item, 'unit_price') else None,
+            #     remarks=f"Device sold in order {order.order_id}"
+            # )
+            # db.session.add(transaction)
+        
+#         db.session.commit()
+        
+#         return jsonify({
+#             'success': True,
+#             'message': 'Serial numbers saved successfully and OUT transactions created'
+#         })
+        
+#     except Exception as e:
+#         db.session.rollback()
+#         print(f"Error saving serial numbers: {str(e)}")
+#         return jsonify({
+#             'error': 'Failed to save serial numbers',
+#             'details': str(e)
+#         }), 500
+
+@order_bp.route('/save-sr-number', methods=['POST'])
+@token_required(roles=['admin'])
+def save_sr_number():
     try:
         data = request.get_json()
-        
-        # Validate request data
-        if not data or not isinstance(data, list):
-            return jsonify({'error': 'Invalid request data format'}), 400
-        
-        # Get order details first to get order information
-        order_details = []
-        for sr_data in data:
-            detail = OrderDetail.query.get(sr_data['detail_id'])
+
+        if not isinstance(data, list):
+            raise BadRequest('Invalid input: Expected an array.')
+
+        detail_id = data[0].get('detail_id')
+        if not detail_id:
+            return jsonify({'error': 'Missing detail_id'}), 400
+
+        # Step 1: Find Detail
+        detail = OrderDetail.query.get(detail_id)
+        if not detail:
+            return jsonify({'error': 'Detail not found'}), 404
+
+        # Step 2: Get Order using order_id
+        order = Order.query.get(detail.order_id)
+        if not order:
+            return jsonify({'error': 'Order not found'}), 404
+
+        # Step 3: Get Customer using cust_id
+        customer = Customer.query.get(order.customer_id)
+        if not customer:
+            return jsonify({'error': 'Customer not found'}), 404
+
+        # Process each detail in the input array
+        for item in data:
+            detail = OrderDetail.query.get(item.get('detail_id'))
             if not detail:
-                continue
-            order_details.append(detail)
-        
-        if not order_details:
-            return jsonify({'error': 'No valid order details found'}), 400
-        
-        # Get the order from the first detail (all details should belong to the same order)
-        order = order_details[0].order
+                continue  # Skip if not found
 
-        # Fallback SKU settings
-        sku_prefix = 'sku'
-        fallback_sku_counter = 123  # Starting point for fallback SKUs
-
-        # Process each serial number
-        for index, (sr_data, detail) in enumerate(zip(data, order_details)):
-            sr_no = sr_data.get('sr_no')
+            sr_no = item.get('sr_no')
             if not sr_no:
-                continue  # Skip if no SR number provided
-                
-            # Update the SR number in OrderDetail
+                continue  # Skip if SR number is missing
+
             detail.sr_no = sr_no
             db.session.add(detail)
 
-            # Determine the SKU (with fallback)
-            if detail.item and hasattr(detail.item, 'sku') and detail.item.sku:
-                sku_id = detail.item.sku
-            else:
-                sku_id = f"{sku_prefix}{fallback_sku_counter + index}"
+            # Construct a simple SKU ID format
+            sku_id = f"{detail.id}-{sr_no}-{order.order_id}"
 
-            # Create OUT transaction for this device
             transaction = DeviceTransaction(
                 device_srno=sr_no,
                 device_name=detail.item.product.name if detail.item and detail.item.product else 'Unknown Device',
                 sku_id=sku_id,
                 order_id=order.order_id,
                 in_out=2,  # OUT transaction
-                create_date=datetime.now().date(),
+                create_date=datetime.now(tz=ZoneInfo('Asia/Kolkata')),
                 price=float(detail.item.unit_price) if detail.item and hasattr(detail.item, 'unit_price') else None,
-                remarks=f"Device sold in order {order.order_id}"
+                remarks=f"Device sold to {customer.name}"
             )
             db.session.add(transaction)
-        
+
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'message': 'Serial numbers saved successfully and OUT transactions created'
         })
-        
+
     except Exception as e:
         db.session.rollback()
-        print(f"Error saving serial numbers: {str(e)}")
+        print(f"Error: {str(e)}")
         return jsonify({
             'error': 'Failed to save serial numbers',
             'details': str(e)
         }), 500
-    
+
 
 @order_bp.route('/order/add-to-order', methods=['POST'])
 @token_required(roles=['customer'])
@@ -1147,8 +1234,7 @@ def add_to_order():
 
     discount_percent = Decimal(str(data.get('discount_percent', 0)))
     tax_percent = Decimal(str(data.get('tax_percent', 0)))
-    delivery_charge = Decimal(str(data.get('delivery_charge', 0)))
-
+   
     
     # Get customer ID from token
     customer_id = request.current_user.customer_id
@@ -1189,8 +1275,13 @@ def add_to_order():
     
     # Calculate final amount
     discount_amount = (subtotal * discount_percent) / 100
-    tax_amount = ((subtotal - discount_amount) * tax_percent) / 100
-    total_amount = subtotal - discount_amount + tax_amount + delivery_charge
+
+    delivery_charge=calculateDelivery(subtotal)
+
+    total_amount = subtotal - discount_amount  + delivery_charge
+
+    gst=subtotal-(subtotal/1.18)
+    subtotal-=gst
     
     try:
         # Get the next order_index value
@@ -1198,8 +1289,8 @@ def add_to_order():
         next_order_index = max_order + 1
         
         # Current date for order_id generation
-        current_date = datetime.now()
-        
+        current_date = datetime.now(tz=ZoneInfo('Asia/Kolkata'))
+        current_year = current_date.year
         # Create new order with explicit order_index
         order = Order(
             order_index=next_order_index,
@@ -1212,7 +1303,9 @@ def add_to_order():
             tax_percent=tax_percent,
             total_amount=total_amount,
             channel='online',
+            gst=gst,
             payment_status=data['payment_status'],
+            payment_type=data.get('payment_type', 'cod'),
             fulfillment_status=False,
             delivery_status='pending',
             delivery_method=data['delivery_method'],
@@ -1220,9 +1313,11 @@ def add_to_order():
             created_at=current_date
         )
         
-        # Manually set the order_id with the expected format
-        date_str = current_date.strftime('%d-%m-%Y')
-        order.order_id = f"{date_str}#{next_order_index}"
+        # Manually set the order_id with the expected format (do not rely on __init__)
+        next_year = current_year + 1
+        next_year = str(next_year)
+        current_year = str(current_year)    
+        order.order_id = f"{current_year}{next_year[2:]}#{next_order_index}"
         
         db.session.add(order)
         db.session.flush()
@@ -1539,28 +1634,92 @@ def add_pickup_request(order_id):
         return jsonify({'error': str(e)}), 500
     
 
-@order_bp.route('/order/<string:order_id>/track',methods=['GET'])
-@token_required(roles=['customer', 'admin']) 
-def track_order(order_id):
+# @order_bp.route('/order/<string:order_id>/track',methods=['GET'])
+# @token_required(roles=['customer'])
+# def track_order(order_id):
 
-       try:
-           order = Order.query.filter_by(order_id=order_id).first()
-           if not order:
-               return jsonify({'error': 'Order not found'}), 404
-           waybill=order.awb_number
-           if not waybill:
-               return jsonify({'error': 'Waybill not found'}), 404
-           # Call the API to track the order
+#        try:
+#            order = Order.query.filter_by(order_id=order_id).first()
+#            if not order:
+#                return jsonify({'error': 'Order not found'}), 404
+#            waybill=order.awb_number
+#            if not waybill:
+#                return jsonify({'error': 'Waybill not found'}), 404
+#            # Call the API to track the order
            
-           DELHIVERY_KEY = os.getenv("DELHIVERY_KEY")
-           url = f"https://track.delhivery.com/api/v1/packages/json/?waybill={waybill}&token={DELHIVERY_KEY}"
+#            DELHIVERY_KEY = os.getenv("DELHIVERY_KEY")
+#            url = f"https://track.delhivery.com/api/v1/packages/json/?waybill={waybill}&token={DELHIVERY_KEY}"
 
-           response = requests.get(url)
-           response.raise_for_status()  # Raises HTTPError for bad responses (4xx/5xx)
-           return response.json()
-       except requests.exceptions.RequestException as e:
-        return {'error': str(e)}
+#            response = requests.get(url)
+#            response.raise_for_status()  # Raises HTTPError for bad responses (4xx/5xx)
+#            return response.json()
+#        except requests.exceptions.RequestException as e:
+#         return {'error': str(e)}
        
+
+@order_bp.route('/change-order-status/<string:order_id>' , methods=['POST'])
+@token_required(roles=['admin'])
+def change_order_status(order_id):
+    try:
+
+        data = request.get_json()
+
+        order = Order.query.filter_by(order_id=order_id).first()
+        if not order:
+            return jsonify({'error': 'Order not found'}), 404
+        
+        # Get customer email
+        customer = None
+        if order.customer_id:
+            customer = Customer.query.get(order.customer_id)
+        elif order.offline_customer_id:
+            # Handle offline customer if needed
+            pass
+            
+        if not customer:
+            return jsonify({'error': 'Customer not found'}), 404
+        
+        order.order_status = data.get('status')
+        db.session.commit()
+        
+        # Send approval email to customer
+        try:
+            subject = f"Your Order #{order_id} Has Been {data.get('status')}"
+            body = f"""
+            Dear {customer.name},
+            
+            We're pleased to inform you that your order #{order_id} has been approved and is being processed.
+            
+            Order Details:
+            - Order ID: {order_id}
+            - Total Amount: {order.total_amount}
+            - Status: Approved
+            
+            Thank you for shopping with us!
+            
+            Best regards,
+            Your Store Team
+            """
+            
+            msg = MIMEText(body)
+            msg['Subject'] = subject
+            msg['From'] = SMTP_USERNAME
+            msg['To'] = customer.email
+            
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                server.starttls()
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.send_message(msg)
+        except Exception as email_error:
+            print(f"Failed to send approval email: {email_error}")
+            # Continue even if email fails
+        
+        return jsonify({'message': 'Order approved successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
 
 
 @order_bp.route('/approve-order/<string:order_id>', methods=['GET'])
@@ -1709,7 +1868,7 @@ def update_payment_status(order_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
-
+    
 
 @order_bp.route('/update-order-status/<string:order_id>', methods=['PUT'])
 @token_required(roles=['admin'])
@@ -1755,14 +1914,14 @@ def update_order_status(order_id):
         # Create status history record
         status_history = OrderStatusHistory(
             order_id=order.order_id,
-            changed_by='admin',  # 👈 Hardcoded to 'admin' instead of current_user.id
+            changed_by='admin',  
             from_status=f"fulfill:{prev_fulfillment}, delivery:{prev_delivery}",
             to_status=f"fulfill:{order.fulfillment_status}, delivery:{order.delivery_status}",
             change_reason=f"Status updated via {action} action"
         )
         db.session.add(status_history)
         
-        order.updated_at = datetime.utcnow()
+        order.updated_at = datetime.now(tz=ZoneInfo('Asia/Kolkata'))
         db.session.commit()
 
         return jsonify({
@@ -1777,3 +1936,34 @@ def update_order_status(order_id):
         db.session.rollback()
         print(f"Error updating order {order_id}: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@order_bp.route('/order/<string:order_id>/track',methods=['GET'])
+@token_required(roles=['customer', 'admin']) 
+def track_order(order_id):
+
+       try:
+           order = Order.query.filter_by(order_id=order_id).first()
+           if not order:
+               return jsonify({'error': 'Order not found'}), 404
+           waybill=order.awb_number
+           if not waybill:
+               return jsonify({'error': 'Waybill not found'}), 404
+           # Call the API to track the order
+           
+           DELHIVERY_KEY = os.getenv("DELHIVERY_KEY")
+           url = f"https://track.delhivery.com/api/v1/packages/json/?waybill={waybill}&token={DELHIVERY_KEY}"
+
+           response = requests.get(url)
+           data = response.json()
+           shipment_status = data.get("ShipmentData", [{}])[0].get("Shipment", {}).get("Status", {}).get("Status", "")
+           print(shipment_status)
+           if shipment_status == 'In Transit':
+                order.delivery_status = 'Shipped'
+           elif shipment_status == 'Delivered':
+               order.delivery_status = 'Delivered'
+           db.session.add(order)
+           db.session.commit()
+           return jsonify(data)
+       
+       except requests.exceptions.RequestException as e:
+        return {'error': str(e)}
