@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from models.order import Order,OrderItem,OrderDetail, OrderStatusHistory
+from models.order import Order,OrderItem,OrderDetail, OrderStatusHistory , SerialNumber
 from models.customer import Customer
 from models.offline_customer import OfflineCustomer
 from models.cart import Cart,CartItem
@@ -491,6 +491,7 @@ def get_orders():
         'awb_number': order.awb_number,
         'order_status': order.order_status,  # ✅ Added this line
         'payment_type': order.payment_type,
+        'gst': float(order.gst),  # Add this line to include GST in response
         'created_at': order.created_at.isoformat(),
         'items': [{
             'product_id': item.product_id,
@@ -563,6 +564,154 @@ def get_rejected_orders():
 
 
 
+# @order_bp.route('/orders', methods=['POST'])
+# @token_required(roles=['admin'])
+# def create_order():
+#     data = request.get_json()
+
+#     # Validate customer
+#     customer = OfflineCustomer.query.get(data.get('customer_id'))
+#     if not customer:
+#         return jsonify({'error': 'Customer not found'}), 404
+
+#     # Get customer's default address
+#     address = Address.query.filter_by(offline_customer_id=customer.customer_id).first()
+#     if not address:
+#         return jsonify({'error': 'No address found for customer'}), 404
+
+#     subtotal = 0
+#     order_items = []
+#     stock_updates = []
+
+#     # Prepare order items and check stock
+#     for item in data.get('items', []):
+#         product = Product.query.get(item['product_id'])
+#         if not product:
+#             return jsonify({'error': f"Product {item['product_id']} not found"}), 404
+
+#         color = ProductColor.query.get(item.get('color_id')) if item.get('color_id') else None
+#         model = ProductModel.query.get(item.get('model_id')) if item.get('model_id') else None
+
+#         if color and color.stock_quantity < item['quantity']:
+#             return jsonify({
+#                 'error': f"Not enough stock for color '{color.name}'. Available: {color.stock_quantity}"
+#             }), 400
+
+#         unit_price = color.price
+#         total_price = unit_price * item['quantity']
+
+#         subtotal += total_price
+
+#         order_items.append({
+#             'product_id': item['product_id'],
+#             'model_id': item.get('model_id'),
+#             'color_id': item.get('color_id'),
+#             'quantity': item['quantity'],
+#             'unit_price': unit_price,
+#             'total_price': total_price
+#         })
+
+#         # Keep track of stock updates
+#         if color:
+#             color.stock_quantity -= item['quantity']
+#             stock_updates.append(color)
+
+#     #Calculate totals
+#     discount_amount = (subtotal * data.get('discount_percent', 0)) / 100
+
+#     delivery_charge=calculateDelivery(subtotal)
+    
+#     #remove tax_amt
+#     total_amount = subtotal - discount_amount  + delivery_charge
+
+#     gst = subtotal - (subtotal / Decimal('1.18'))    
+#     subtotal-=gst
+
+
+#     try:
+#         # Get the next order_index value
+#         max_order = db.session.query(db.func.max(Order.order_index)).scalar() or 0
+#         next_order_index = max_order + 1
+        
+#         # Current date for order_id generation
+#         current_date = datetime.now(tz=ZoneInfo('Asia/Kolkata'))
+#         current_year = current_date.year
+        
+#         # Create and add order with explicit order_index
+#         order = Order(
+#             order_index=next_order_index,
+#             offline_customer_id=customer.customer_id,
+#             address_id=address.address_id,
+#             total_items=len(order_items),
+#             subtotal=subtotal,
+#             discount_percent=data.get('discount_percent', 0),
+#             delivery_charge=delivery_charge,
+#             tax_percent=data.get('tax_percent', 0),
+#             total_amount=total_amount,
+#             gst=gst,
+#             channel=data.get('channel', 'offline'),
+#             payment_status='pending',
+#             order_status='APPROVED',
+#             payment_type=data.get('payment_type', 'cod'),
+#             fulfillment_status=data.get('fulfillment_status', False),
+#             delivery_status=data.get('delivery_status', 'intransit'),
+#             delivery_method=data.get('delivery_method', 'shipping'),
+#             created_at=current_date
+#         )
+        
+#         next_year = current_year + 1
+#         next_year = str(next_year)
+#         current_year = str(current_year)    
+#         order.order_id = f"{current_year}{next_year[2:]}#{next_order_index}"
+        
+#         db.session.add(order)
+#         db.session.flush()  # Generate order_id
+
+#         # Add order items
+#         for item in order_items:
+#             order_item = OrderItem(
+#                 order_id=order.order_id,
+#                 product_id=item['product_id'],
+#                 model_id=item.get('model_id'),
+#                 color_id=item.get('color_id'),
+#                 quantity=item['quantity'],
+#                 unit_price=item['unit_price'],
+#                 total_price=item['total_price']
+#             )
+            
+#             db.session.add(order_item)
+#             db.session.flush()  # Generate order_item.item_id
+
+#             for i in range(1, order_item.quantity + 1):
+#                 order_detail = OrderDetail(
+#                     item_id=order_item.item_id,
+#                     order_id=order.order_id,
+#                     product_id=order_item.product_id
+#                 )
+#                 db.session.add(order_detail)
+            
+
+#         # Apply stock updates
+#         for color in stock_updates:
+#             db.session.add(color)
+#             if color.stock_quantity <= color.threshold:
+#                 print(f"Warning: Product color {color.name} stock is below threshold ({color.stock_quantity}/{color.threshold})")
+
+#         db.session.commit()
+
+
+
+#         return jsonify({
+#             'message': 'Order created successfully', 
+#             'order_id': order.order_id,
+#             'timestamp': current_date.isoformat()
+#         }), 201
+
+#     except SQLAlchemyError as e:
+#         db.session.rollback()
+#         return jsonify({'error': f'Database error: {str(e)}'}), 500
+
+
 @order_bp.route('/orders', methods=['POST'])
 @token_required(roles=['admin'])
 def create_order():
@@ -581,6 +730,7 @@ def create_order():
     subtotal = 0
     order_items = []
     stock_updates = []
+    total_extra_discount = 0
 
     # Prepare order items and check stock
     for item in data.get('items', []):
@@ -596,8 +746,13 @@ def create_order():
                 'error': f"Not enough stock for color '{color.name}'. Available: {color.stock_quantity}"
             }), 400
 
-        unit_price = color.price
+        unit_price = item.get('unit_price', color.price if color else 0)
         total_price = unit_price * item['quantity']
+
+        # Calculate extra discount for this item
+        extra_discount_percent = float(item.get('extra_discount_percent', 0))
+        extra_discount_amount = (total_price * extra_discount_percent) / 100
+        total_extra_discount += extra_discount_amount
 
         subtotal += total_price
 
@@ -615,34 +770,36 @@ def create_order():
             color.stock_quantity -= item['quantity']
             stock_updates.append(color)
 
-    #Calculate totals
+    # Calculate totals
     discount_amount = (subtotal * data.get('discount_percent', 0)) / 100
 
-    delivery_charge=calculateDelivery(subtotal)
-    
-    #remove tax_amt
-    total_amount = subtotal - discount_amount  + delivery_charge
+    delivery_charge = calculateDelivery(subtotal)
 
-    gst=subtotal-(subtotal/1.18)
-    subtotal-=gst
+    # Subtract extra_discount from subtotal
+    subtotal_after_extra_discount = subtotal - total_extra_discount
 
+    # Remove tax_amt
+    total_amount = subtotal_after_extra_discount - discount_amount + delivery_charge
+
+    gst = subtotal_after_extra_discount - (subtotal_after_extra_discount / 1.18)
+    subtotal_after_extra_discount -= gst
 
     try:
         # Get the next order_index value
         max_order = db.session.query(db.func.max(Order.order_index)).scalar() or 0
         next_order_index = max_order + 1
-        
+
         # Current date for order_id generation
         current_date = datetime.now(tz=ZoneInfo('Asia/Kolkata'))
         current_year = current_date.year
-        
+
         # Create and add order with explicit order_index
         order = Order(
             order_index=next_order_index,
             offline_customer_id=customer.customer_id,
             address_id=address.address_id,
             total_items=len(order_items),
-            subtotal=subtotal,
+            subtotal=subtotal_after_extra_discount,
             discount_percent=data.get('discount_percent', 0),
             delivery_charge=delivery_charge,
             tax_percent=data.get('tax_percent', 0),
@@ -657,12 +814,12 @@ def create_order():
             delivery_method=data.get('delivery_method', 'shipping'),
             created_at=current_date
         )
-        
+
         next_year = current_year + 1
         next_year = str(next_year)
-        current_year = str(current_year)    
+        current_year = str(current_year)
         order.order_id = f"{current_year}{next_year[2:]}#{next_order_index}"
-        
+
         db.session.add(order)
         db.session.flush()  # Generate order_id
 
@@ -677,7 +834,7 @@ def create_order():
                 unit_price=item['unit_price'],
                 total_price=item['total_price']
             )
-            
+
             db.session.add(order_item)
             db.session.flush()  # Generate order_item.item_id
 
@@ -688,7 +845,6 @@ def create_order():
                     product_id=order_item.product_id
                 )
                 db.session.add(order_detail)
-            
 
         # Apply stock updates
         for color in stock_updates:
@@ -698,10 +854,8 @@ def create_order():
 
         db.session.commit()
 
-
-
         return jsonify({
-            'message': 'Order created successfully', 
+            'message': 'Order created successfully',
             'order_id': order.order_id,
             'timestamp': current_date.isoformat()
         }), 201
@@ -709,9 +863,6 @@ def create_order():
     except SQLAlchemyError as e:
         db.session.rollback()
         return jsonify({'error': f'Database error: {str(e)}'}), 500
-
-
-
 
 
 @order_bp.route('/order/place-order', methods=['POST'])
@@ -977,6 +1128,89 @@ def get_order_items_expanded(order_id):
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
     
 
+# @order_bp.route('/orders/<string:order_id>/details-expanded', methods=['GET'])
+# def get_order_details_expanded(order_id):
+#     try:
+#         # Get the order and verify it exists
+#         order = Order.query.get(order_id)
+#         if not order:
+#             return jsonify({'error': 'Order not found'}), 404
+        
+#         # Get all order details for this order
+#         order_details = OrderDetail.query.filter_by(order_id=order_id).all()
+        
+#         expanded_details = []
+#         for detail in order_details:
+#             # Get related order item
+#             order_item = detail.item
+            
+#             # Safely access related objects
+#             product_name = order_item.product.name if order_item.product and hasattr(order_item, 'product') else None
+#             model_name = order_item.model.name if order_item.model and hasattr(order_item, 'model') else None
+#             color_name = order_item.color.name if order_item.color and hasattr(order_item, 'color') else None
+            
+#             expanded_details.append({
+#                 'detail_id': detail.id,
+#                 'item_id': detail.item_id,
+#                 'order_id': detail.order_id,
+#                 'product_id': detail.product_id,
+#                 'sr_no': detail.sr_no,
+#                 'product_name': product_name,
+#                 'model_name': model_name,
+#                 'color_name': color_name,
+#                 'unit_price': float(order_item.unit_price) if order_item else 0,
+#                 'status': getattr(detail, 'status', None),
+#                 'created_at': detail.created_at.isoformat() if hasattr(detail, 'created_at') and detail.created_at else None
+#             })
+        
+#         # Include address information like in the /orders endpoint
+#         address_data = None
+#         if order.address:
+#             address_data = {
+#                 'address_id': order.address.address_id,
+#                 'name': order.address.name,
+#                 'mobile': order.address.mobile,
+#                 'pincode': order.address.pincode,
+#                 'locality': order.address.locality,
+#                 'address_line': order.address.address_line,
+#                 'city': order.address.city,
+#                 'state': {
+#                     'state_id': order.address.state.state_id,
+#                     'name': order.address.state.name,
+#                     'abbreviation': order.address.state.abbreviation
+#                 },
+#                 'landmark': order.address.landmark,
+#                 'alternate_phone': order.address.alternate_phone,
+#                 'address_type': order.address.address_type,
+#                 'latitude': order.address.latitude,
+#                 'longitude': order.address.longitude,
+#                 'is_available': order.address.is_available  # ✅ Make sure this is included
+#             }
+        
+#         return jsonify({
+#             'order_id': order.order_id,
+#             'customer_id': order.customer_id,
+#             'offline_customer_id': order.offline_customer_id,
+#             'customer_type': 'offline' if order.offline_customer_id else 'online',
+#             'total_details': len(expanded_details),
+#             'subtotal': float(order.subtotal),
+#             'total_amount': float(order.total_amount),
+#             'payment_status': order.payment_status,
+#             'fulfillment_status': order.fulfillment_status,
+#             'delivery_status': order.delivery_status,
+#             'created_at': order.created_at.isoformat(),
+#             'awb_number': order.awb_number,
+#             'payment_type': order.payment_type,
+#             'upload_wbn': order.upload_wbn,
+#             'address': address_data,
+#             'details': expanded_details
+#         })
+
+#     except Exception as e:
+#         print(f"Error in get_order_details_expanded: {str(e)}")
+#         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
+
+
 @order_bp.route('/orders/<string:order_id>/details-expanded', methods=['GET'])
 def get_order_details_expanded(order_id):
     try:
@@ -1005,7 +1239,7 @@ def get_order_details_expanded(order_id):
                 'product_id': detail.product_id,
                 'sr_no': detail.sr_no,
                 'product_name': product_name,
-                'model_name': model_name,
+                'model_name': model_name if model_name else product_name,
                 'color_name': color_name,
                 'unit_price': float(order_item.unit_price) if order_item else 0,
                 'status': getattr(detail, 'status', None),
@@ -1033,7 +1267,7 @@ def get_order_details_expanded(order_id):
                 'address_type': order.address.address_type,
                 'latitude': order.address.latitude,
                 'longitude': order.address.longitude,
-                'is_available': order.address.is_available  # ✅ Make sure this is included
+                'is_available': order.address.is_available  #  Make sure this is included
             }
         
         return jsonify({
@@ -1058,10 +1292,6 @@ def get_order_details_expanded(order_id):
     except Exception as e:
         print(f"Error in get_order_details_expanded: {str(e)}")
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
-
-
-
-
 
 
 # @order_bp.route('/orders/save-sr-numbers', methods=['POST'])
@@ -1280,7 +1510,7 @@ def add_to_order():
 
     total_amount = subtotal - discount_amount  + delivery_charge
 
-    gst=subtotal-(subtotal/1.18)
+    gst = subtotal - (subtotal / Decimal('1.18'))    
     subtotal-=gst
     
     try:
@@ -1967,3 +2197,463 @@ def track_order(order_id):
        
        except requests.exceptions.RequestException as e:
         return {'error': str(e)}
+       
+
+
+@order_bp.route('/order/<string:order_id>/get-all-info', methods=['GET'])
+def get_order_details(order_id):
+    """
+    Get comprehensive details about a specific order by order_id
+    
+    Returns all information related to the order including:
+    - Order basic info
+    - Customer details
+    - Address details
+    - Order items with product information
+    - Serial numbers for each item
+    - Order status history
+    """
+    # Find the order
+    order = Order.query.filter_by(order_id=order_id).first()
+    
+    if not order:
+        return jsonify({
+            'success': False,
+            'message': f'Order with ID {order_id} not found'
+        }), 404
+    
+    # Get customer information
+    customer_info = {}
+    if order.customer_id:
+        customer = Customer.query.get(order.customer_id)
+        if customer:
+            customer_info = {
+                'type': 'online',
+                'customer_id': customer.customer_id,
+                'name': customer.name,
+                'email': customer.email,
+                'mobile': customer.mobile,
+                'role': customer.role,
+                'gender': customer.gender,
+                'age': customer.age,
+                'created_at': customer.created_at.isoformat() if hasattr(customer, 'created_at') and customer.created_at else None
+            }
+    elif order.offline_customer_id:
+        offline_customer = OfflineCustomer.query.get(order.offline_customer_id)
+        if offline_customer:
+            customer_info = {
+                'type': 'offline',
+                'customer_id': offline_customer.customer_id,
+                'name': offline_customer.name,
+                'email': offline_customer.email,
+                'mobile': offline_customer.mobile,
+                'role': offline_customer.role,
+                'created_at': offline_customer.created_at.isoformat() if hasattr(offline_customer, 'created_at') and offline_customer.created_at else None
+            }
+    
+    # Get address information
+    address_info = {}
+    if order.address_id:
+        address = Address.query.get(order.address_id)
+        if address:
+            address_info = {
+                'address_id': address.address_id,
+                'name': address.name,
+                'mobile': address.mobile,
+                'pincode': address.pincode,
+                'locality': address.locality,
+                'address_line': address.address_line,
+                'city': address.city,
+                'state_id': address.state_id,
+                'state_name': address.state.name if address.state else None,
+                'landmark': address.landmark,
+                'alternate_phone': address.alternate_phone,
+                'address_type': address.address_type,
+                'latitude': address.latitude,
+                'longitude': address.longitude
+            }
+    
+    # Get order items with product details and serial numbers
+    items_info = []
+    for item in order.items:
+        # Get product details
+        product_info = {}
+        if item.product:
+            product_info = {
+                'product_id': item.product.product_id,
+                'name': item.product.name,
+                'description': item.product.description,
+                'product_type': item.product.product_type,
+                'rating': item.product.rating,
+                'raters': item.product.raters,
+                'sku_id': item.product.sku_id,
+                'category_id': item.product.category_id
+            }
+            
+            # Get product images
+            product_images = []
+            if hasattr(item.product, 'images'):
+                product_images = [img.image_url for img in item.product.images]
+            product_info['images'] = product_images
+            
+            # Get product specifications
+            product_specs = {}
+            if hasattr(item.product, 'specifications'):
+                for spec in item.product.specifications:
+                    product_specs[spec.key] = spec.value
+            product_info['specifications'] = product_specs
+        
+        # Get model details
+        model_info = {}
+        if item.model:
+            model_info = {
+                'model_id': item.model.model_id,
+                'name': item.model.name,
+                'description': item.model.description
+            }
+            
+            # Get model specifications
+            model_specs = {}
+            if hasattr(item.model, 'specifications'):
+                for spec in item.model.specifications:
+                    model_specs[spec.key] = spec.value
+            model_info['specifications'] = model_specs
+        
+        # Get color details
+        color_info = {}
+        if item.color:
+            color_info = {
+                'color_id': item.color.color_id,
+                'name': item.color.name,
+                'price': float(item.color.price) if hasattr(item.color, 'price') and item.color.price is not None else None,
+                'original_price': float(item.color.original_price) if hasattr(item.color, 'original_price') and item.color.original_price is not None else None,
+                'stock_quantity': item.color.stock_quantity if hasattr(item.color, 'stock_quantity') else None
+            }
+            
+            # Get color images
+            color_images = []
+            if hasattr(item.color, 'images'):
+                color_images = [img.image_url for img in item.color.images]
+            color_info['images'] = color_images
+        
+        # Get serial numbers
+        serial_numbers = []
+        if hasattr(item, 'serial_numbers'):
+            serial_numbers = [
+                {
+                    'id': sn.id,
+                    'sr_number': sn.sr_number
+                } for sn in item.serial_numbers
+            ]
+        
+        # Get item details
+        item_details = []
+        if hasattr(item, 'details'):
+            item_details = [
+                {
+                    'id': detail.id,
+                    'sr_no': detail.sr_no
+                } for detail in item.details
+            ]
+        
+        # Combine all item information
+        items_info.append({
+            'item_id': item.item_id if hasattr(item, 'item_id') else None,
+            'product': product_info,
+            'model': model_info,
+            'color': color_info,
+            'quantity': item.quantity if hasattr(item, 'quantity') else None,
+            'unit_price': float(item.unit_price) if hasattr(item, 'unit_price') and item.unit_price is not None else None,
+            'total_price': float(item.total_price) if hasattr(item, 'total_price') and item.total_price is not None else None,
+            'serial_numbers': serial_numbers,
+            'details': item_details
+        })
+    
+    # Get order status history
+    status_history = []
+    if hasattr(order, 'status_history'):
+        status_history = [
+            {
+                'id': record.id,
+                'changed_by': record.changed_by if hasattr(record, 'changed_by') else None,
+                'from_status': record.from_status if hasattr(record, 'from_status') else None,
+                'to_status': record.to_status if hasattr(record, 'to_status') else None,
+                'change_reason': record.change_reason if hasattr(record, 'change_reason') else None,
+                'changed_at': record.changed_at.isoformat() if hasattr(record, 'changed_at') and record.changed_at else None
+            } for record in order.status_history
+        ]
+    
+    # Create the response with all order information
+    response = {
+        'success': True,
+        'data': {
+            'order': {
+                'order_id': order.order_id,
+                'order_index': order.order_index if hasattr(order, 'order_index') else None,
+                'total_items': order.total_items if hasattr(order, 'total_items') else None,
+                'subtotal': float(order.subtotal) if order.subtotal is not None else None,
+                'discount_percent': float(order.discount_percent) if order.discount_percent is not None else None,
+                'delivery_charge': float(order.delivery_charge) if order.delivery_charge is not None else None,
+                'tax_percent': float(order.tax_percent) if order.tax_percent is not None else None,
+                'total_amount': float(order.total_amount) if order.total_amount is not None else None,
+                'channel': order.channel if hasattr(order, 'channel') else None,
+                'payment_status': order.payment_status if hasattr(order, 'payment_status') else None,
+                'fulfillment_status': order.fulfillment_status if hasattr(order, 'fulfillment_status') else None,
+                'delivery_status': order.delivery_status if hasattr(order, 'delivery_status') else None,
+                'delivery_method': order.delivery_method if hasattr(order, 'delivery_method') else None,
+                'awb_number': order.awb_number if hasattr(order, 'awb_number') else None,
+                'upload_wbn': order.upload_wbn if hasattr(order, 'upload_wbn') else None,
+                'order_status': order.order_status if hasattr(order, 'order_status') else None,
+                'payment_type': order.payment_type if hasattr(order, 'payment_type') else None,
+                'gst': float(order.gst) if order.gst is not None else None,
+                'created_at': order.created_at.isoformat() if order.created_at else None,
+                'updated_at': order.updated_at.isoformat() if order.updated_at else None
+            },
+            'customer': customer_info,
+            'address': address_info,
+            'items': items_info,
+            'status_history': status_history
+        }
+    }
+    
+    return jsonify(response), 200
+
+
+
+
+@order_bp.route('/order/by-serial-number/<string:sr_number>', methods=['GET'])
+def get_order_details_by_sr_number(sr_number):
+    """
+    Get comprehensive details about a specific order by serial number (sr_number)
+    
+    Returns all information related to the order including:
+    - Order basic info
+    - Customer details
+    - Address details
+    - Order items with product information
+    - Serial numbers for each item
+    - Order status history
+    """
+    # Find serial number in database
+    serial_number = SerialNumber.query.filter_by(sr_number=sr_number).first()
+    
+    if not serial_number:
+        # Try checking if it's in order details
+        order_detail = OrderDetail.query.filter_by(sr_no=sr_number).first()
+        if not order_detail:
+            return jsonify({
+                'success': False,
+                'message': f'No order found with serial number {sr_number}'
+            }), 404
+        
+        # Get order from order detail
+        order_id = order_detail.order_id
+    else:
+        # Get order_id from serial number via order item
+        order_id = serial_number.order_item.order_id
+    
+    # Find the order
+    order = Order.query.filter_by(order_id=order_id).first()
+    
+    if not order:
+        return jsonify({
+            'success': False,
+            'message': f'Order with ID {order_id} not found'
+        }), 404
+    
+    # Get customer information
+    customer_info = {}
+    if order.customer_id:
+        customer = Customer.query.get(order.customer_id)
+        if customer:
+            customer_info = {
+                'type': 'online',
+                'customer_id': customer.customer_id,
+                'name': customer.name,
+                'email': customer.email,
+                'mobile': customer.mobile,
+                'role': customer.role,
+                'gender': customer.gender,
+                'age': customer.age,
+                'created_at': customer.created_at.isoformat() if hasattr(customer, 'created_at') and customer.created_at else None
+            }
+    elif order.offline_customer_id:
+        offline_customer = OfflineCustomer.query.get(order.offline_customer_id)
+        if offline_customer:
+            customer_info = {
+                'type': 'offline',
+                'customer_id': offline_customer.customer_id,
+                'name': offline_customer.name,
+                'email': offline_customer.email,
+                'mobile': offline_customer.mobile,
+                'role': offline_customer.role,
+                'created_at': offline_customer.created_at.isoformat() if hasattr(offline_customer, 'created_at') and offline_customer.created_at else None
+            }
+    
+    # Get address information
+    address_info = {}
+    if order.address_id:
+        address = Address.query.get(order.address_id)
+        if address:
+            address_info = {
+                'address_id': address.address_id,
+                'name': address.name,
+                'mobile': address.mobile,
+                'pincode': address.pincode,
+                'locality': address.locality,
+                'address_line': address.address_line,
+                'city': address.city,
+                'state_id': address.state_id,
+                'state_name': address.state.name if address.state else None,
+                'landmark': address.landmark,
+                'alternate_phone': address.alternate_phone,
+                'address_type': address.address_type,
+                'latitude': address.latitude,
+                'longitude': address.longitude
+            }
+    
+    # Get order items with product details and serial numbers
+    items_info = []
+    for item in order.items:
+        # Get product details
+        product_info = {}
+        if item.product:
+            product_info = {
+                'product_id': item.product.product_id,
+                'name': item.product.name,
+                'description': item.product.description,
+                'product_type': item.product.product_type,
+                'rating': item.product.rating,
+                'raters': item.product.raters,
+                'sku_id': item.product.sku_id,
+                'category_id': item.product.category_id
+            }
+            
+            # Get product images
+            product_images = []
+            if hasattr(item.product, 'images'):
+                product_images = [img.image_url for img in item.product.images]
+            product_info['images'] = product_images
+            
+            # Get product specifications
+            product_specs = {}
+            if hasattr(item.product, 'specifications'):
+                for spec in item.product.specifications:
+                    product_specs[spec.key] = spec.value
+            product_info['specifications'] = product_specs
+        
+        # Get model details
+        model_info = {}
+        if item.model:
+            model_info = {
+                'model_id': item.model.model_id,
+                'name': item.model.name,
+                'description': item.model.description
+            }
+            
+            # Get model specifications
+            model_specs = {}
+            if hasattr(item.model, 'specifications'):
+                for spec in item.model.specifications:
+                    model_specs[spec.key] = spec.value
+            model_info['specifications'] = model_specs
+        
+        # Get color details
+        color_info = {}
+        if item.color:
+            color_info = {
+                'color_id': item.color.color_id,
+                'name': item.color.name,
+                'price': float(item.color.price) if hasattr(item.color, 'price') and item.color.price is not None else None,
+                'original_price': float(item.color.original_price) if hasattr(item.color, 'original_price') and item.color.original_price is not None else None,
+                'stock_quantity': item.color.stock_quantity if hasattr(item.color, 'stock_quantity') else None
+            }
+            
+            # Get color images
+            color_images = []
+            if hasattr(item.color, 'images'):
+                color_images = [img.image_url for img in item.color.images]
+            color_info['images'] = color_images
+        
+        # Get serial numbers
+        serial_numbers = []
+        if hasattr(item, 'serial_numbers'):
+            serial_numbers = [
+                {
+                    'id': sn.id,
+                    'sr_number': sn.sr_number
+                } for sn in item.serial_numbers
+            ]
+        
+        # Get item details
+        item_details = []
+        if hasattr(item, 'details'):
+            item_details = [
+                {
+                    'id': detail.id,
+                    'sr_no': detail.sr_no
+                } for detail in item.details
+            ]
+        
+        # Combine all item information
+        items_info.append({
+            'item_id': item.item_id if hasattr(item, 'item_id') else None,
+            'product': product_info,
+            'model': model_info,
+            'color': color_info,
+            'quantity': item.quantity if hasattr(item, 'quantity') else None,
+            'unit_price': float(item.unit_price) if hasattr(item, 'unit_price') and item.unit_price is not None else None,
+            'total_price': float(item.total_price) if hasattr(item, 'total_price') and item.total_price is not None else None,
+            'serial_numbers': serial_numbers,
+            'details': item_details
+        })
+    
+    # Get order status history
+    status_history = []
+    if hasattr(order, 'status_history'):
+        status_history = [
+            {
+                'id': record.id,
+                'changed_by': record.changed_by if hasattr(record, 'changed_by') else None,
+                'from_status': record.from_status if hasattr(record, 'from_status') else None,
+                'to_status': record.to_status if hasattr(record, 'to_status') else None,
+                'change_reason': record.change_reason if hasattr(record, 'change_reason') else None,
+                'changed_at': record.changed_at.isoformat() if hasattr(record, 'changed_at') and record.changed_at else None
+            } for record in order.status_history
+        ]
+    
+    # Create the response with all order information
+    response = {
+        'success': True,
+        'data': {
+            'order': {
+                'order_id': order.order_id,
+                'order_index': order.order_index if hasattr(order, 'order_index') else None,
+                'total_items': order.total_items if hasattr(order, 'total_items') else None,
+                'subtotal': float(order.subtotal) if order.subtotal is not None else None,
+                'discount_percent': float(order.discount_percent) if order.discount_percent is not None else None,
+                'delivery_charge': float(order.delivery_charge) if order.delivery_charge is not None else None,
+                'tax_percent': float(order.tax_percent) if order.tax_percent is not None else None,
+                'total_amount': float(order.total_amount) if order.total_amount is not None else None,
+                'channel': order.channel if hasattr(order, 'channel') else None,
+                'payment_status': order.payment_status if hasattr(order, 'payment_status') else None,
+                'fulfillment_status': order.fulfillment_status if hasattr(order, 'fulfillment_status') else None,
+                'delivery_status': order.delivery_status if hasattr(order, 'delivery_status') else None,
+                'delivery_method': order.delivery_method if hasattr(order, 'delivery_method') else None,
+                'awb_number': order.awb_number if hasattr(order, 'awb_number') else None,
+                'upload_wbn': order.upload_wbn if hasattr(order, 'upload_wbn') else None,
+                'order_status': order.order_status if hasattr(order, 'order_status') else None,
+                'payment_type': order.payment_type if hasattr(order, 'payment_type') else None,
+                'gst': float(order.gst) if order.gst is not None else None,
+                'created_at': order.created_at.isoformat() if order.created_at else None,
+                'updated_at': order.updated_at.isoformat() if order.updated_at else None
+            },
+            'customer': customer_info,
+            'address': address_info,
+            'items': items_info,
+            'status_history': status_history,
+            'searched_serial_number': sr_number
+        }
+    }
+    
+    return jsonify(response), 200
