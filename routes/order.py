@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from models.order import Order,OrderItem,OrderDetail, OrderStatusHistory , SerialNumber
+from models.order import Order,OrderItem,OrderDetail, OrderStatusHistory, SerialNumber
 from models.customer import Customer
 from models.offline_customer import OfflineCustomer
 from models.cart import Cart,CartItem
@@ -490,7 +490,7 @@ def get_orders():
         'delivery_status': order.delivery_status,
         'delivery_method': order.delivery_method,
         'awb_number': order.awb_number,
-        'order_status': order.order_status,  # Added this line
+        'order_status': order.order_status,  #  Added this line
         'payment_type': order.payment_type,
         'created_at': order.created_at.isoformat(),
         'items': [{
@@ -500,9 +500,11 @@ def get_orders():
             'quantity': item.quantity,
             'unit_price': float(item.unit_price),
             'total_price': float(item.total_price),
+            'extra_item_discount_percent': item.extra_item_discount_percent,
             'image_url': item.product.images[0].image_url if item.product and item.product.images else None,
         } for item in order.items]
     } for order in orders])
+
 
 
 
@@ -532,13 +534,14 @@ def get_rejected_orders():
             'address_type': order.address.address_type,
             'latitude': order.address.latitude,
             'longitude': order.address.longitude,
-            'is_available': order.address.is_available  # ✅ Added this line
+            'is_available': order.address.is_available  #  Added this line
 
         },
         'total_items': order.total_items,
         'subtotal': float(order.subtotal),
         'discount_percent': float(order.discount_percent),
         'delivery_charge': float(order.delivery_charge),
+        'gst':float(order.gst) if order.gst else None,
         'tax_percent': float(order.tax_percent),
         'total_amount': float(order.total_amount),
         'channel': order.channel,
@@ -563,8 +566,6 @@ def get_rejected_orders():
 
 
 
-
-
 @order_bp.route('/orders', methods=['POST'])
 # @token_required(roles=['admin'])
 def create_order():
@@ -581,7 +582,7 @@ def create_order():
         return jsonify({'error': 'No address found for customer'}), 404
 
     subtotal = 0
-    total_discount_amount = 0
+    total_discount_amount = Decimal('0')
     order_items = []
     stock_updates = []
 
@@ -599,8 +600,15 @@ def create_order():
                 'error': f"Not enough stock for color '{color.name}'. Available: {color.stock_quantity}"
             }), 400
 
+
         item_discount_percent = item.get('extra_discount_percent', 0)
-        unit_price = color.price - (color.price*item_discount_percent/100)
+
+        discount_percent = Decimal(item_discount_percent) / Decimal('100')
+
+        unit_price = color.price - (color.price * discount_percent)
+
+        # Now apply rounding: if decimal part >= 0.5, round up, else down
+        unit_price = int(unit_price) + 1 if unit_price - int(unit_price) >= Decimal('0.5') else int(unit_price)
         
         # Calculate item subtotal (before discount)
         item_subtotal = unit_price * item['quantity']
@@ -615,17 +623,17 @@ def create_order():
         # Add to order totals
         subtotal += item_subtotal
         total_discount_amount += item_discount_amount
-
+        print(item.get('extra_discount_percent', 0))
         order_items.append({
             'product_id': item['product_id'],
             'model_id': item.get('model_id'),
             'color_id': item.get('color_id'),
+            'extra_item_discount_percent':item.get('extra_discount_percent', 0),
             'quantity': item['quantity'],
             'unit_price': unit_price,
             'discount_percent': item_discount_percent,
             'discount_amount': item_discount_amount,
-            'total_price': total_price,
-            'extra_item_discount_percent':item.get('extra_discount_percent'),
+            'total_price': total_price
         })
 
         # Keep track of stock updates
@@ -634,16 +642,17 @@ def create_order():
             stock_updates.append(color)
 
     # Apply any order-level discount if needed (optional)
-    order_discount_percent = data.get('discount_percent', 0)
-    order_discount_amount = (subtotal * order_discount_percent) / 100
+    order_discount_percent = Decimal(data.get('discount_percent', 0))
+    order_discount_amount = (subtotal * order_discount_percent) / Decimal('100')
     
-    
+    # Total discount combines item-level and order-level discounts
     total_discount_amount += order_discount_amount
 
     # Calculate amount after discounts
     amount_after_discount = subtotal - order_discount_amount
     
-    
+    # Calculate GST (assumed 18% based on original code)
+    # Using the correct GST calculation method (18% of subtotal excluding GST)
     subtotal_without_gst = amount_after_discount / Decimal('1.18')
     gst = amount_after_discount - subtotal_without_gst
     
@@ -702,10 +711,10 @@ def create_order():
                 color_id=item.get('color_id'),
                 quantity=item['quantity'],
                 unit_price=item['unit_price'],
+                extra_item_discount_percent=item['extra_item_discount_percent'],
                 # discount_percent=item.get('discount_percent', 0),  # ADDED: Store discount percent 
                 # discount_amount=item.get('discount_amount', 0),    # ADDED: Store discount amount
-                total_price=item['total_price'],
-                extra_item_discount_percent=item.get('extra_item_discount_percent'),
+                total_price=item['total_price']
             )
             
             db.session.add(order_item)
@@ -744,10 +753,6 @@ def create_order():
     except SQLAlchemyError as e:
         db.session.rollback()
         return jsonify({'error': f'Database error: {str(e)}'}), 500
-
-
-
-
 
 @order_bp.route('/order/place-order', methods=['POST'])
 @token_required(roles=['customer'])
@@ -974,21 +979,46 @@ def get_order_items_expanded(order_id):
         
         expanded_items = []
         for item in order.items:
-            # Safely access related objects
-            product_name = item.product.name if item.product and hasattr(item, 'product') else None
-            model_name = item.model.name if item.model and hasattr(item, 'model') else None
-            color_name = item.color.name if item.color and hasattr(item, 'color') else None
+            # Get the product and check its type
+            product = Product.query.get(item.product_id) if item.product_id else None
             
+            # Initialize variables
+            product_name = None
+            model_name = None
+            color_name = None
+            
+            if product:
+                product_name = product.name
+                
+                # Handle differently based on product type
+                if product.product_type == 'variable':
+                    # For variable products, get model and color information
+                    if hasattr(item, 'model_id') and item.model_id:
+                        model = ProductModel.query.get(item.model_id)
+                        model_name = model.name if model else None
+                    
+                    if hasattr(item, 'color_id') and item.color_id:
+                        color = ProductColor.query.get(item.color_id)
+                        color_name = color.name if color else None
+                
+                elif product.product_type == 'single':
+                    # For single products, only color information might be relevant
+                    if hasattr(item, 'color_id') and item.color_id:
+                        color = ProductColor.query.get(item.color_id)
+                        color_name = color.name if color else None
+            
+            # Create expanded items for each quantity
             for _ in range(item.quantity):
                 expanded_items.append({
                     'item_id': item.item_id,
                     'product_id': item.product_id,
-                    'model_id': item.model_id,
-                    'color_id': item.color_id,
+                    'product_type': product.product_type if product else None,
+                    'model_id': item.model_id if hasattr(item, 'model_id') else None,
+                    'color_id': item.color_id if hasattr(item, 'color_id') else None,
                     'unit_price': float(item.unit_price),
                     'total_price': float(item.unit_price),
                     'product_name': product_name,
-                    'model_name': model_name,
+                    'model_name': model_name if model_name else product_name,
                     'color_name': color_name,
                     'status': getattr(item, 'status', None)  # Safely get status if it exists
                 })
@@ -1010,89 +1040,7 @@ def get_order_items_expanded(order_id):
         # Log the error for debugging
         print(f"Error in get_order_items_expanded: {str(e)}")
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
-    
 
-# @order_bp.route('/orders/<string:order_id>/details-expanded', methods=['GET'])
-# def get_order_details_expanded(order_id):
-#     try:
-#         # Get the order and verify it exists
-#         order = Order.query.get(order_id)
-#         if not order:
-#             return jsonify({'error': 'Order not found'}), 404
-        
-#         # Get all order details for this order
-#         order_details = OrderDetail.query.filter_by(order_id=order_id).all()
-        
-#         expanded_details = []
-#         for detail in order_details:
-#             # Get related order item
-#             order_item = detail.item
-            
-#             # Safely access related objects
-#             product_name = order_item.product.name if order_item.product and hasattr(order_item, 'product') else None
-#             model_name = order_item.model.name if order_item.model and hasattr(order_item, 'model') else None
-#             color_name = order_item.color.name if order_item.color and hasattr(order_item, 'color') else None
-            
-#             expanded_details.append({
-#                 'detail_id': detail.id,
-#                 'item_id': detail.item_id,
-#                 'order_id': detail.order_id,
-#                 'product_id': detail.product_id,
-#                 'sr_no': detail.sr_no,
-#                 'product_name': product_name,
-#                 'model_name': model_name,
-#                 'color_name': color_name,
-#                 'unit_price': float(order_item.unit_price) if order_item else 0,
-#                 'status': getattr(detail, 'status', None),
-#                 'created_at': detail.created_at.isoformat() if hasattr(detail, 'created_at') and detail.created_at else None
-#             })
-        
-#         # Include address information like in the /orders endpoint
-#         address_data = None
-#         if order.address:
-#             address_data = {
-#                 'address_id': order.address.address_id,
-#                 'name': order.address.name,
-#                 'mobile': order.address.mobile,
-#                 'pincode': order.address.pincode,
-#                 'locality': order.address.locality,
-#                 'address_line': order.address.address_line,
-#                 'city': order.address.city,
-#                 'state': {
-#                     'state_id': order.address.state.state_id,
-#                     'name': order.address.state.name,
-#                     'abbreviation': order.address.state.abbreviation
-#                 },
-#                 'landmark': order.address.landmark,
-#                 'alternate_phone': order.address.alternate_phone,
-#                 'address_type': order.address.address_type,
-#                 'latitude': order.address.latitude,
-#                 'longitude': order.address.longitude,
-#                 'is_available': order.address.is_available  # ✅ Make sure this is included
-#             }
-        
-#         return jsonify({
-#             'order_id': order.order_id,
-#             'customer_id': order.customer_id,
-#             'offline_customer_id': order.offline_customer_id,
-#             'customer_type': 'offline' if order.offline_customer_id else 'online',
-#             'total_details': len(expanded_details),
-#             'subtotal': float(order.subtotal),
-#             'total_amount': float(order.total_amount),
-#             'payment_status': order.payment_status,
-#             'fulfillment_status': order.fulfillment_status,
-#             'delivery_status': order.delivery_status,
-#             'created_at': order.created_at.isoformat(),
-#             'awb_number': order.awb_number,
-#             'payment_type': order.payment_type,
-#             'upload_wbn': order.upload_wbn,
-#             'address': address_data,
-#             'details': expanded_details
-#         })
-
-#     except Exception as e:
-#         print(f"Error in get_order_details_expanded: {str(e)}")
-#         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
 
 
 @order_bp.route('/orders/<string:order_id>/details-expanded', methods=['GET'])
@@ -1102,20 +1050,33 @@ def get_order_details_expanded(order_id):
         order = Order.query.get(order_id)
         if not order:
             return jsonify({'error': 'Order not found'}), 404
-        
+
         # Get all order details for this order
         order_details = OrderDetail.query.filter_by(order_id=order_id).all()
-        
+
         expanded_details = []
         for detail in order_details:
             # Get related order item
             order_item = detail.item
-            
+
             # Safely access related objects
             product_name = order_item.product.name if order_item.product and hasattr(order_item, 'product') else None
-            model_name = order_item.model.name if order_item.model and hasattr(order_item, 'model') else None
+
+            # Try to get model name and id through proper relationships
+            model_name = None
+            model_id = None
+            if order_item.model and hasattr(order_item, 'model'):
+                model_name = order_item.model.name
+                model_id = order_item.model.model_id
+            elif order_item.product_id:
+                # Fallback to default model if model relation is missing
+                default_model = ProductModel.query.filter_by(product_id=order_item.product_id).first()
+                if default_model:
+                    model_name = default_model.name
+                    model_id = default_model.model_id
+
             color_name = order_item.color.name if order_item.color and hasattr(order_item, 'color') else None
-            
+
             expanded_details.append({
                 'detail_id': detail.id,
                 'item_id': detail.item_id,
@@ -1123,13 +1084,14 @@ def get_order_details_expanded(order_id):
                 'product_id': detail.product_id,
                 'sr_no': detail.sr_no,
                 'product_name': product_name,
-                'model_name': model_name if model_name else product_name,
+                'model_name': model_name,
+                'model_id': model_id,
                 'color_name': color_name,
                 'unit_price': float(order_item.unit_price) if order_item else 0,
                 'status': getattr(detail, 'status', None),
                 'created_at': detail.created_at.isoformat() if hasattr(detail, 'created_at') and detail.created_at else None
             })
-        
+
         # Include address information like in the /orders endpoint
         address_data = None
         if order.address:
@@ -1151,9 +1113,9 @@ def get_order_details_expanded(order_id):
                 'address_type': order.address.address_type,
                 'latitude': order.address.latitude,
                 'longitude': order.address.longitude,
-                'is_available': order.address.is_available  #  Make sure this is included
+                'is_available': order.address.is_available
             }
-        
+
         return jsonify({
             'order_id': order.order_id,
             'customer_id': order.customer_id,
@@ -1275,7 +1237,9 @@ def save_sr_number():
         # Step 3: Get Customer using cust_id
         customer = Customer.query.get(order.customer_id)
         if not customer:
-            return jsonify({'error': 'Customer not found'}), 404
+            customer=OfflineCustomer.query.get(order.offline_customer_id)
+            if not customer:
+                return jsonify({'error': 'Customer not found'}), 404
 
         # Process each detail in the input array
         for item in data:
@@ -1319,6 +1283,7 @@ def save_sr_number():
             'error': 'Failed to save serial numbers',
             'details': str(e)
         }), 500
+
 
 
 @order_bp.route('/order/add-to-order', methods=['POST'])
@@ -1394,7 +1359,9 @@ def add_to_order():
 
     total_amount = subtotal - discount_amount  + delivery_charge
 
-    gst = subtotal - (subtotal / Decimal('1.18'))    
+    from decimal import Decimal
+
+    gst = subtotal - (subtotal / Decimal('1.18'))
     subtotal-=gst
     
     try:
@@ -1707,7 +1674,7 @@ def add_pickup_request(order_id):
             headers=headers,
             data={
                 'data': json.dumps(payload),
-                'format': 'json'  # ✅ Important to add this
+                'format': 'json'  #  Important to add this
             }
         )
 
@@ -1737,7 +1704,7 @@ def add_pickup_request(order_id):
                 'waybill': order.awb_number,
                 'upload_wbn': order.upload_wbn,
                 'fulfillment_status': True,  # Added to response
-                'delhivery_payload_sent': payload,   # ⬅️ Add this line
+                'delhivery_payload_sent': payload,   #  Add this line
                 'response': response_data
             }), 200
         except Exception as e:
@@ -2081,7 +2048,7 @@ def track_order(order_id):
        
        except requests.exceptions.RequestException as e:
         return {'error': str(e)}
-       
+
 
 
 @order_bp.route('/order/<string:order_id>/get-all-info', methods=['GET'])
@@ -2180,7 +2147,7 @@ def get_order_details(order_id):
                 product_images = [img.image_url for img in item.product.images]
             product_info['images'] = product_images
             
-            # Replace the product specifications code block (around line 100)
+            # Get product specifications
             product_specs = {}
             if hasattr(item.product, 'specifications'):
                 for spec in item.product.specifications:
@@ -2200,7 +2167,6 @@ def get_order_details(order_id):
             }
             
             # Get model specifications
-            # Replace the model specifications code block (around line 125)
             model_specs = {}
             if hasattr(item.model, 'specifications'):
                 for spec in item.model.specifications:
@@ -2271,6 +2237,7 @@ def get_order_details(order_id):
             'quantity': item.quantity if hasattr(item, 'quantity') else None,
             'unit_price': float(item.unit_price) if hasattr(item, 'unit_price') and item.unit_price is not None else None,
             'total_price': float(item.total_price) if hasattr(item, 'total_price') and item.total_price is not None else None,
+            'extra_item_discount_percent': float(item.extra_item_discount_percent) if hasattr(item, 'extra_item_discount_percent') and item.extra_item_discount_percent is not None else None,
             'serial_numbers': serial_numbers,
             'details': item_details
         })
@@ -2530,6 +2497,7 @@ def get_order_details_by_sr_number(sr_number):
             'quantity': item.quantity if hasattr(item, 'quantity') else None,
             'unit_price': float(item.unit_price) if hasattr(item, 'unit_price') and item.unit_price is not None else None,
             'total_price': float(item.total_price) if hasattr(item, 'total_price') and item.total_price is not None else None,
+            'extra_item_discount_percent': float(item.extra_item_discount_percent) if hasattr(item, 'extra_item_discount_percent') and item.extra_item_discount_percent is not None else None,
             'serial_numbers': serial_numbers,
             'details': item_details
         })
