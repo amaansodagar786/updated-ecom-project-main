@@ -38,7 +38,7 @@ def upload_device_transaction():
         df.columns = [col.strip() for col in df.columns]
 
         required_columns = [
-            'Device_SRNO', 'Device_Name', 'SKU_ID', 'Order_ID', 'IN_Out', 'Create_date', 'Price', 'Remarks'
+            'Device_SRNO', 'Model_Name', 'SKU_ID', 'Order_ID', 'IN_Out', 'Create_date', 'Price', 'Remarks'
         ]
         
         # Fill missing columns with None
