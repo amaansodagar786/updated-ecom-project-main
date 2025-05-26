@@ -29,6 +29,8 @@ class Order(db.Model):
     order_status = db.Column(db.String(10), default="PENDING")
     payment_type = db.Column(db.String(20), default='cod')    
     gst=db.Column(db.Numeric(10, 2), default=0.00)
+    invoice_number = db.Column(db.String(50), nullable=True)
+    remarks = db.Column(db.Text, nullable=True)  # Add this line
     created_at = db.Column(db.DateTime, default=datetime.now(tz=ZoneInfo('Asia/Kolkata')))
     updated_at = db.Column(db.DateTime, default=datetime.now(tz=ZoneInfo('Asia/Kolkata')), onupdate=datetime.now(tz=ZoneInfo('Asia/Kolkata')))
     

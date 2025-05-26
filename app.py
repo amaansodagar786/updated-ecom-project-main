@@ -87,8 +87,12 @@ cors = CORS(app, resources={
 
 
 # Configure MySQL database
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:root@localhost/ecom-project'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:root@localhost/ecom-project' 
+# app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://new_mtm_user:dev%402025@103.198.175.81/new_mtm_store_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+
+# app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:root@localhost/ecom-project' 
 
 # NEW 
 # Configure MySQL database

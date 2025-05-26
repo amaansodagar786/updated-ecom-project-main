@@ -29,7 +29,7 @@ def list_products():
             db.joinedload(Product.images),
             db.joinedload(Product.main_category),
             db.joinedload(Product.sub_category),
-            db.joinedload(Product.specifications),  # Add this line
+            db.joinedload(Product.specifications),
             db.joinedload(Product.models).joinedload(ProductModel.specifications),
             db.joinedload(Product.colors).joinedload(ProductColor.images),
             db.joinedload(Product.hsn),
@@ -46,14 +46,11 @@ def list_products():
                 'hsn': product.hsn.hsn_code if product.hsn else None,
                 'sku_id': product.sku_id,                
                 'product_type': product.product_type,
-                'rating': product.rating,
-                'raters': product.raters,
+                'rating': product.rating,  # Average rating
+                'offers': product.offers,
+                'raters': product.raters,  # Total number of raters
                 'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
-                # 'specifications': [{'key': s.key, 'value': s.value} for s in product.specifications],
-                # ADD SPEC ID TO SEND TO THE FRONTEND 
                 'specifications': [{'spec_id': s.spec_id, 'key': s.key, 'value': s.value} for s in product.specifications],
-
-
             }
             
             # Add models for all product types
@@ -65,8 +62,6 @@ def list_products():
                     'name': model.name,
                     'description': model.description,
                     'colors': [],
-
-                    # ADD SPEC ID TO SEND TO THE FORNTEND
                     'specifications': [
                         {'spec_id': spec.spec_id , 'key': spec.key, 'value': spec.value} for spec in model.specifications
                     ]
@@ -88,7 +83,6 @@ def list_products():
             
             # Add single product specific info
             if product.product_type == 'single':
-                # product_dict['unit'] = product.unit
                 product_dict['colors'] = []
                 
                 for color in product.colors:
@@ -110,6 +104,8 @@ def list_products():
     except Exception as e:
         logger.error(f"Error listing products: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
 
 # Get product details by product_id
 @products_bp.route('/product/<int:product_id>', methods=['GET'])
@@ -134,11 +130,11 @@ def product_detail(product_id):
             'hsn_id': product.hsn.hsn_code if product.hsn else None,
             'sku_id': product.sku_id,
             'product_type': product.product_type,
-            'rating': product.rating,
-            'raters': product.raters,
+            'rating': product.rating,  # Average rating
+            'raters': product.raters,  # Total number of raters
+            'offers': product.offers,
             'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
             'specifications': [{'spec_id': s.spec_id, 'key': s.key, 'value': s.value} for s in product.specifications],
-
         }
         
         # Add models for all product types
@@ -151,7 +147,6 @@ def product_detail(product_id):
                 'description': model.description,
                 'colors': [],
                 'specifications': [{'spec_id': s.spec_id, 'key': s.key, 'value': s.value} for s in product.specifications],
-            
             }
             
             for color in model.colors:
@@ -170,7 +165,6 @@ def product_detail(product_id):
         
         # Add single product specific info
         if product.product_type == 'single':
-            # product_dict['unit'] = product.unit
             product_dict['colors'] = []
             
             for color in product.colors:
@@ -207,7 +201,6 @@ def get_product_by_slug(product_slug):
                 db.joinedload(Product.colors).joinedload(ProductColor.images)
             ).get(product_slug)
             if product:
-                # Use the same serialization logic as below instead of to_dict()
                 product_dict = {
                     'product_id': product.product_id,
                     'name': product.name,
@@ -216,8 +209,9 @@ def get_product_by_slug(product_slug):
                     'subcategory': getattr(product.sub_category, 'name', None),
                     'hsn_id': getattr(getattr(product, 'hsn', None), 'hsn_code', None),
                     'product_type': product.product_type,
-                    'rating': product.rating,
-                    'raters': product.raters,
+                    'rating': product.rating,  # Average rating
+                    'raters': product.raters,  # Total number of raters
+                    'offers': product.offers,
                     'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
                     'specifications': [{'spec_id': s.spec_id, 'key': s.key, 'value': s.value} for s in product.specifications],
                     'models': [],
@@ -265,7 +259,6 @@ def get_product_by_slug(product_slug):
                 return jsonify(product_dict)
         
         # Otherwise search by name (with hyphens replaced by spaces)
-        # name = product_slug.replace('-', ' ')
         name = unquote(product_slug).replace('-', ' ')
         product = Product.query.options(
             db.joinedload(Product.images),
@@ -282,7 +275,6 @@ def get_product_by_slug(product_slug):
         if not product:
             return jsonify({'error': 'Product not found'}), 404
         
-        # Use the same serialization logic as your product_detail endpoint
         product_dict = {
             'product_id': product.product_id,
             'name': product.name,
@@ -291,8 +283,9 @@ def get_product_by_slug(product_slug):
             'subcategory': getattr(product.sub_category, 'name', None),
             'hsn_id': getattr(getattr(product, 'hsn', None), 'hsn_code', None),
             'product_type': product.product_type,
-            'rating': product.rating,
-            'raters': product.raters,
+            'rating': product.rating,  # Average rating
+            'raters': product.raters,  # Total number of raters
+            'offers': product.offers,
             'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
             'specifications': [{'spec_id': s.spec_id, 'key': s.key, 'value': s.value} for s in product.specifications],
             'models': [],
@@ -343,6 +336,169 @@ def get_product_by_slug(product_slug):
         logger.error(f"Error getting product by slug {product_slug}: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
     
+
+
+@products_bp.route('/product/<int:product_id>/similar', methods=['GET'])
+def get_similar_products(product_id):
+    try:
+        current_product = Product.query.options(
+            db.joinedload(Product.main_category),
+            db.joinedload(Product.sub_category),
+            db.joinedload(Product.colors),
+            db.joinedload(Product.models).joinedload(ProductModel.colors)
+        ).get_or_404(product_id)
+        
+        if not current_product.main_category:
+            return jsonify({'similar_products': []})
+        
+        similar_products = Product.query.filter(
+            Product.product_id != product_id,
+            Product.main_category.has(category_id=current_product.main_category.category_id),
+            Product.product_type == current_product.product_type
+        ).options(
+            db.joinedload(Product.images),
+            db.joinedload(Product.main_category),
+            db.joinedload(Product.sub_category),
+            db.joinedload(Product.colors),
+            db.joinedload(Product.models).joinedload(ProductModel.colors)
+        ).limit(8).all()
+        
+        result = []
+        for product in similar_products:
+            # Get price info using same logic as frontend
+            price_info = get_product_price_info(product)
+            
+            product_dict = {
+                'product_id': product.product_id,
+                'name': product.name,
+                'description': product.description,
+                'category': product.main_category.name if product.main_category else None,
+                'product_type': product.product_type,
+                'rating': product.rating,
+                'raters': product.raters,
+                'images': [{
+                    'image_url': img.image_url,
+                    'is_video': img.image_url.lower().endswith('.mp4')
+                } for img in product.images],
+                'price': price_info['price'],
+                'original_price': price_info['original_price'],
+                'stock_quantity': price_info['stock_quantity'],
+                'colors': [{
+                    'color_id': c.color_id,
+                    'name': c.name,
+                    'price': float(c.price) if c.price else None,
+                    'original_price': float(c.original_price) if c.original_price else None,
+                    'stock_quantity': c.stock_quantity
+                } for c in product.colors] if product.product_type == 'single' else None,
+                'models': [{
+                    'model_id': m.model_id,
+                    'name': m.name,
+                    'description': m.description,
+                    'colors': [{
+                        'color_id': c.color_id,
+                        'name': c.name,
+                        'price': float(c.price) if c.price else None,
+                        'original_price': float(c.original_price) if c.original_price else None,
+                        'stock_quantity': c.stock_quantity
+                    } for c in m.colors]
+                } for m in product.models] if product.product_type == 'variable' else None
+            }
+            
+            result.append(product_dict)
+        
+        return jsonify({'similar_products': result})
+    
+    except Exception as e:
+        logger.error(f"Error getting similar products: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+def get_product_price_info(product):
+    """Helper function to calculate price info same as frontend logic"""
+    price = None
+    original_price = None
+    stock_quantity = 0
+    
+    if product.product_type == 'single' and product.colors:
+        valid_colors = [c for c in product.colors if c.price is not None]
+        if valid_colors:
+            min_price_color = min(valid_colors, key=lambda x: x.price)
+            price = float(min_price_color.price)
+            if min_price_color.original_price:
+                original_price = float(min_price_color.original_price)
+            stock_quantity = sum(c.stock_quantity for c in product.colors)
+    
+    elif product.product_type == 'variable' and product.models:
+        all_colors = []
+        for model in product.models:
+            if model.colors:
+                all_colors.extend(model.colors)
+        
+        valid_colors = [c for c in all_colors if c.price is not None]
+        if valid_colors:
+            min_price_color = min(valid_colors, key=lambda x: x.price)
+            price = float(min_price_color.price)
+            if min_price_color.original_price:
+                original_price = float(min_price_color.original_price)
+            stock_quantity = sum(c.stock_quantity for c in all_colors)
+    
+    return {
+        'price': price,
+        'original_price': original_price,
+        'stock_quantity': stock_quantity
+    }
+
+
+
+
+@products_bp.route('/offers/update', methods=['POST'])
+def update_offer():
+    try:
+        data = request.get_json()
+        print("Received data:", data)  # ✅ Debug log
+
+        product_id = data.get('product_id')
+        offer_value = data.get('offer_value')
+        print(f"Parsed product_id: {product_id}, offer_value: {offer_value}")  # ✅ Debug log
+
+        if not product_id:
+            print("Error: Product ID is missing")  # ✅ Debug log
+            return jsonify({'error': 'Product ID is required'}), 400
+
+        # Validate offer value (either None or between 0-100)
+        if offer_value is not None:
+            try:
+                offer_value = int(offer_value)
+                if offer_value < 0 or offer_value > 100:
+                    print("Error: Offer out of range")  # ✅ Debug log
+                    return jsonify({'error': 'Offer must be between 0 and 100'}), 400
+            except ValueError:
+                print("Error: Offer is not a valid integer")  # ✅ Debug log
+                return jsonify({'error': 'Invalid offer value'}), 400
+
+        product = Product.query.get(product_id)
+        if not product:
+            print(f"Error: Product with ID {product_id} not found")  # ✅ Debug log
+            return jsonify({'error': 'Product not found'}), 404
+
+        # Update the offer
+        product.offers = str(offer_value) if offer_value is not None else None
+        product.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        print(f"Offer updated: Product ID {product_id}, New offer: {product.offers}")  # ✅ Debug log
+
+        return jsonify({
+            'message': 'Offer updated successfully',
+            'product_id': product.product_id,
+            'offers': product.offers
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print("Exception occurred:", str(e))  # ✅ Debug log
+        return jsonify({'error': str(e)}), 500
+
+
 
 # Routes for categories
 @products_bp.route('/categories', methods=['GET'])
@@ -419,234 +575,6 @@ def save_image(image_file):
         return f'/product_images/{filename}'
     return None
 
-
-
-
-# Add a new product
-# @products_bp.route('/product/add', methods=['POST'])
-# @token_required(roles=['admin'])
-# def add_product():
-#     # Ensure upload directory exists
-#     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-#     try:
-#         # Extract basic product information
-#         name = request.form.get('name')
-#         description = request.form.get('description')
-#         product_type = request.form.get('product_type')
-
-#         # Handle category, subcategory, and hsn
-#         category_id = request.form.get('category_id')
-#         subcategory_id = request.form.get('subcategory_id')
-#         hsn_id = request.form.get('hsn_id')
-
-#         # Check if we need to create a new category
-#         if not category_id and request.form.get('new_category'):
-#             new_category = Category(
-#                 name=request.form.get('new_category'),
-#                 image_url=save_image(request.files.get('image'))
-#             )
-#             db.session.add(new_category)
-#             db.session.commit()
-#             category_id = new_category.category_id
-
-#         # Check if we need to create a new subcategory
-#         if category_id and not subcategory_id and request.form.get('new_subcategory'):
-#             new_subcategory = Subcategory(
-#                 name=request.form.get('new_subcategory'),
-#                 category_id=category_id
-#             )
-#             db.session.add(new_subcategory)
-#             db.session.commit()
-#             subcategory_id = new_subcategory.subcategory_id
-
-#         # Check if we need to create a new HSN
-#         if not hsn_id and request.form.get('new_hsn_code'):
-#             new_hsn = HSN(
-#                 hsn_code=request.form.get('new_hsn_code'),
-#                 hsn_description=request.form.get('new_hsn_description', '')
-#             )
-#             db.session.add(new_hsn)
-#             db.session.commit()
-#             hsn_id = new_hsn.hsn_id
-
-#         # Validate required fields
-#         print(name, description, category_id, product_type)
-#         if not all([name, description, category_id, product_type]):
-#             return jsonify({'message': 'Missing required product details'}), 400
-
-#         # Create new product
-#         new_product = Product(
-#             name=name,
-#             description=description,
-#             category_id=category_id,
-#             subcategory_id=subcategory_id,
-#             hsn_id=hsn_id,
-#             product_type=product_type,
-#             rating=0,
-#             raters=0
-#         )
-#         db.session.add(new_product)
-#         db.session.commit()
-
-#         # Handle product-level images
-#         product_images = request.files.getlist('product_images')
-#         for image_file in product_images:
-#             image_url = save_image(image_file)
-#             if image_url:
-#                 product_image = ProductImage(
-#                     product_id=new_product.product_id,
-#                     image_url=image_url
-#                 )
-#                 db.session.add(product_image)
-
-#         # Handle Single Product
-#         if product_type == 'single':
-#             # Create default model for single product
-#             default_model = ProductModel(
-#                 product_id=new_product.product_id,
-#                 name=name,
-#                 description=description
-#             )
-#             db.session.add(default_model)
-#             db.session.commit()
-
-#             # Process specifications
-#             specs_count = int(request.form.get('specs_count', 0))
-#             for i in range(specs_count):
-#                 spec_key = request.form.get(f'spec_key_{i}')
-#                 spec_value = request.form.get(f'spec_value_{i}')
-#                 if spec_key and spec_value:
-#                     spec = ProductSpecification(
-#                         product_id=new_product.product_id,
-#                         key=spec_key,
-#                         value=spec_value
-#                     )
-#                     db.session.add(spec)
-
-#             # Process colors
-#             colors_count = int(request.form.get('colors_count', 0))
-#             for i in range(colors_count):
-#                 color_name = request.form.get(f'color_name_{i}')
-#                 color_price = request.form.get(f'color_price_{i}')
-#                 color_original_price = request.form.get(f'color_original_price_{i}')
-#                 color_stock = request.form.get(f'color_stock_{i}', 0)
-#                 threshold = request.form.get(f'threshold_{i}', 10)
-
-#                 if color_name and color_price:
-#                     color = ProductColor(
-#                         product_id=new_product.product_id,
-#                         model_id=default_model.model_id,
-#                         name=color_name,
-#                         stock_quantity=int(color_stock),
-#                         price=float(color_price),
-#                         original_price=float(color_original_price) if color_original_price else None,
-#                         threshold=int(threshold)
-#                     )
-#                     db.session.add(color)
-#                     db.session.commit()
-
-#                     # Process color images
-#                     color_images = request.files.getlist(f'color_images_{i}')
-#                     for image_file in color_images:
-#                         image_url = save_image(image_file)
-#                         if image_url:
-#                             image = ProductImage(
-#                                 product_id=new_product.product_id,
-#                                 color_id=color.color_id,
-#                                 image_url=image_url
-#                             )
-#                             db.session.add(image)
-
-#         # Handle Variable Product
-#         elif product_type == 'variable':
-#             models_count = int(request.form.get('models_count', 0))
-#             for i in range(models_count):
-#                 model_name = request.form.get(f'model_name_{i}')
-#                 model_description = request.form.get(f'model_description_{i}')
-
-#                 if model_name and model_description:
-#                     model = ProductModel(
-#                         product_id=new_product.product_id,
-#                         name=model_name,
-#                         description=model_description
-#                     )
-#                     db.session.add(model)
-#                     db.session.commit()
-
-#                     # Process model specifications
-#                     model_specs_count = int(request.form.get(f'model_specs_count_{i}', 0))
-#                     for j in range(model_specs_count):
-#                         spec_key = request.form.get(f'model_{i}_spec_key_{j}')
-#                         spec_value = request.form.get(f'model_{i}_spec_value_{j}')
-#                         if spec_key and spec_value:
-#                             spec = ModelSpecification(
-#                                 model_id=model.model_id,
-#                                 key=spec_key,
-#                                 value=spec_value
-#                             )
-#                             db.session.add(spec)
-
-#                     # Process model colors
-#                     model_colors_count = int(request.form.get(f'model_colors_count_{i}', 0))
-#                     for j in range(model_colors_count):
-#                         color_name = request.form.get(f'model_{i}_color_name_{j}')
-#                         color_price = request.form.get(f'model_{i}_color_price_{j}')
-#                         color_original_price = request.form.get(f'model_{i}_color_original_price_{j}')
-#                         color_stock = request.form.get(f'model_{i}_color_stock_{j}', 0)
-#                         threshold = request.form.get(f'model_{i}_threshold_{j}', 10)
-
-#                         if color_name and color_price:
-#                             color = ProductColor(
-#                                 product_id=new_product.product_id,
-#                                 model_id=model.model_id,
-#                                 name=color_name,
-#                                 stock_quantity=int(color_stock),
-#                                 price=float(color_price),
-#                                 original_price=float(color_original_price) if color_original_price else None,
-#                                 threshold=int(threshold)
-#                             )
-#                             db.session.add(color)
-#                             db.session.commit()
-
-#                             # Process color images
-#                             color_images = request.files.getlist(f'model_{i}_color_images_{j}')
-#                             for image_file in color_images:
-#                                 image_url = save_image(image_file)
-#                                 if image_url:
-#                                     image = ProductImage(
-#                                         product_id=new_product.product_id,
-#                                         color_id=color.color_id,
-#                                         image_url=image_url
-#                                     )
-#                                     db.session.add(image)
-
-#         hsn_code = ""
-#         if hsn_id:
-#             hsn_code = db.session.query(HSN.hsn_code).filter(HSN.hsn_id == hsn_id).scalar() or "NA"
-#         else:
-#             hsn_code = "NA"
-
-#         # Format the SKU ID
-#         sku_id = f"{category_id}-{subcategory_id}-{hsn_code}-{new_product.product_id}"
-
-#         # Update the product with the SKU ID
-#         new_product.sku_id = sku_id
-
-#         # Commit all changes
-#         db.session.commit()
-
-#         logger.info(f"Product added by admin: {request.current_user.email} - Product ID: {new_product.product_id}")
-
-#         return jsonify({
-#             'message': 'Product added successfully!',
-#             'product_id': new_product.product_id
-#         }), 201
-
-#     except Exception as e:
-#         db.session.rollback()
-#         logger.error(f"Error adding product by {request.current_user.email}: {str(e)}")
-#         return jsonify({'message': f'An error occurred while adding the product: {str(e)}'}), 500
 
 
 @products_bp.route('/product/add', methods=['POST'])

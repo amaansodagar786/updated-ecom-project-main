@@ -14,6 +14,9 @@ class OfflineCustomer(UserMixin, db.Model):
 
     # Google Auth fields
     google_id = db.Column(db.String(255), unique=True, nullable=True)
+
+    #CSP CODE FIELD
+    csp_code = db.Column(db.String(100), nullable=True, default=None)
     
     
     # Relationships
@@ -35,5 +38,6 @@ class OfflineCustomer(UserMixin, db.Model):
             'name': self.name,
             'mobile': self.mobile,
             'email': self.email,
+            'csp_code': self.csp_code,
             'role': self.role,            
         } 

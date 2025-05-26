@@ -457,6 +457,7 @@ def get_orders():
     return jsonify([{
         'order_id': order.order_id,
         'customer_id': order.customer_id,
+        'invoice_number': order.invoice_number,
         'address': {
             'address_id': order.address.address_id,
             'name': order.address.name,
@@ -490,7 +491,7 @@ def get_orders():
         'delivery_status': order.delivery_status,
         'delivery_method': order.delivery_method,
         'awb_number': order.awb_number,
-        'order_status': order.order_status,  #  Added this line
+        'order_status': order.order_status,  
         'payment_type': order.payment_type,
         'created_at': order.created_at.isoformat(),
         'items': [{
@@ -1140,76 +1141,6 @@ def get_order_details_expanded(order_id):
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
 
 
-# @order_bp.route('/orders/save-sr-numbers', methods=['POST'])
-# def save_serial_numbers():
-#     try:
-#         data = request.get_json()
-        
-#         # Validate request data
-#         if not data or not isinstance(data, list):
-#             return jsonify({'error': 'Invalid request data format'}), 400
-        
-#         # Get order details first to get order information
-#         order_details = []
-#         for sr_data in data:
-#             detail = OrderDetail.query.get(sr_data['detail_id'])
-#             if not detail:
-#                 continue
-#             order_details.append(detail)
-        
-#         if not order_details:
-#             return jsonify({'error': 'No valid order details found'}), 400
-        
-#         # Get the order from the first detail (all details should belong to the same order)
-#         order = order_details[0].order
-
-#         # Fallback SKU settings
-#         sku_prefix = 'sku'
-#         fallback_sku_counter = 123  # Starting point for fallback SKUs
-
-#         # Process each serial number
-#         for index, (sr_data, detail) in enumerate(zip(data, order_details)):
-#             sr_no = sr_data.get('sr_no')
-#             if not sr_no:
-#                 continue  # Skip if no SR number provided
-                
-#             # Update the SR number in OrderDetail
-#             detail.sr_no = sr_no
-#             db.session.add(detail)
-
-#             # Determine the SKU (with fallback)
-#             if detail.item and hasattr(detail.item, 'sku') and detail.item.sku:
-#                 sku_id = detail.item.sku
-#             else:
-#                 sku_id = f"{sku_prefix}{fallback_sku_counter + index}"
-
-#             # Create OUT transaction for this device
-            # transaction = DeviceTransaction(
-            #     device_srno=sr_no,
-            #     device_name=detail.item.product.name if detail.item and detail.item.product else 'Unknown Device',
-            #     sku_id=sku_id,
-            #     order_id=order.order_id,
-            #     in_out=2,  # OUT transaction
-            #     create_date=datetime.now(tz=ZoneInfo('Asia/Kolkata')),
-            #     price=float(detail.item.unit_price) if detail.item and hasattr(detail.item, 'unit_price') else None,
-            #     remarks=f"Device sold in order {order.order_id}"
-            # )
-            # db.session.add(transaction)
-        
-#         db.session.commit()
-        
-#         return jsonify({
-#             'success': True,
-#             'message': 'Serial numbers saved successfully and OUT transactions created'
-#         })
-        
-#     except Exception as e:
-#         db.session.rollback()
-#         print(f"Error saving serial numbers: {str(e)}")
-#         return jsonify({
-#             'error': 'Failed to save serial numbers',
-#             'details': str(e)
-#         }), 500
 
 @order_bp.route('/save-sr-number', methods=['POST'])
 @token_required(roles=['admin'])
@@ -1259,7 +1190,7 @@ def save_sr_number():
 
             transaction = DeviceTransaction(
                 device_srno=sr_no,
-                device_name=detail.item.product.name if detail.item and detail.item.product else 'Unknown Device',
+                model_name = detail.item.model.name if detail.item and detail.item.model else 'Unknown Model',
                 sku_id=sku_id,
                 order_id=order.order_id,
                 in_out=2,  # OUT transaction
@@ -1927,6 +1858,29 @@ def reject_order(order_id):
 
 
 
+@order_bp.route('/update-invoice', methods=['POST'])
+@token_required(roles=['admin'])
+def update_invoice():
+    data = request.get_json()
+    order_id = data.get('order_id')
+    invoice_number = data.get('invoice_number')
+
+    if not order_id or not invoice_number:
+        return jsonify({'error': 'Order ID and invoice number are required'}), 400
+
+    order = Order.query.filter_by(order_id=order_id).first()
+    if not order:
+        return jsonify({'error': 'Order not found'}), 404
+
+    order.invoice_number = invoice_number
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Invoice number updated successfully',
+        'order_id': order.order_id,
+        'invoice_number': order.invoice_number
+    }), 200
+
 
 @order_bp.route('/update-payment-status/<path:order_id>', methods=['PUT'])
 @token_required(roles=['admin'])
@@ -2551,3 +2505,51 @@ def get_order_details_by_sr_number(sr_number):
     }
     
     return jsonify(response), 200
+
+
+@order_bp.route('/update-awb', methods=['POST'])
+@token_required(roles=['admin'])
+def update_awb():
+    data = request.get_json()
+    order_id = data.get('order_id')
+    awb_number = data.get('awb_number')
+
+    if not order_id or not awb_number:
+        return jsonify({'error': 'Order ID and AWB number are required'}), 400
+
+    order = Order.query.filter_by(order_id=order_id).first()
+    if not order:
+        return jsonify({'error': 'Order not found'}), 404
+
+    # Check if order is fulfilled
+    if not order.fulfillment_status:
+        return jsonify({'error': 'Order must be fulfilled to update AWB number'}), 400
+
+    order.awb_number = awb_number
+    db.session.commit()
+
+    return jsonify({
+        'message': 'AWB number updated successfully',
+        'order_id': order.order_id,
+        'awb_number': order.awb_number
+    }), 200
+
+
+@order_bp.route('/orders/<order_id>/remarks', methods=['PUT'])
+@token_required(roles=['admin'])
+def update_order_remarks( order_id):
+    data = request.get_json()
+    remarks = data.get('remarks')
+
+    order = Order.query.filter_by(order_id=order_id).first()
+    if not order:
+        return jsonify({'error': 'Order not found'}), 404
+
+    order.remarks = remarks
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': 'Remarks updated successfully',
+        'order_id': order.order_id
+    }), 200

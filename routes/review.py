@@ -100,7 +100,69 @@ def get_all_reviews():
     
     return jsonify([review.to_dict() for review in reviews]), 200
 
-
+@reviews_bp.route('/review/simple', methods=['POST'])
+@token_required(roles=['customer' , 'admin'])
+def post_simple_review():
+    """
+    Simplified review endpoint - only requires login (no purchase check)
+    """
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    required_fields = ['product_id', 'rating']
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"error": f"Missing required field: {field}"}), 400
+    
+    # Validate rating is between 1 and 5
+    if not 1 <= data['rating'] <= 5:
+        return jsonify({"error": "Rating must be between 1 and 5"}), 400
+    
+    product_id = data['product_id']
+    customer_id = request.current_user.customer_id
+    description = data.get('description', '')
+    
+    # Check if product exists
+    product = Product.query.get(product_id)
+    if not product:
+        return jsonify({"error": "Product not found"}), 404
+    
+    # Check if user has already reviewed this product
+    existing_review = Review.query.filter_by(
+        product_id=product_id, 
+        customer_id=customer_id
+    ).first()
+    
+    if existing_review:
+        return jsonify({
+            "error": "You have already reviewed this product",
+            "existing_review": existing_review.to_dict()
+        }), 400
+    
+    # Create new review
+    new_review = Review(
+        product_id=product_id,
+        customer_id=customer_id,
+        rating=data['rating'],
+        description=description
+    )
+    
+    try:
+        db.session.add(new_review)
+        db.session.commit()
+        
+        # Update product rating
+        product.update_rating()
+        
+        return jsonify({
+            "message": "Review submitted successfully",
+            "review": new_review.to_dict()
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 @reviews_bp.route('/reviews/customer/<int:customer_id>', methods=['GET'])
 def get_reviews_by_customer(customer_id):
