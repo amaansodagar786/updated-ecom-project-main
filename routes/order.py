@@ -19,15 +19,16 @@ from middlewares.Calculate_delivery_charge import calculateDelivery
 from email.mime.text import MIMEText
 from zoneinfo import ZoneInfo
 from decimal import Decimal
+from services.pincode_check import is_service_available
 
 
 # Email configuration (replace with your SMTP details)
 SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
 SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
-# SMTP_USERNAME = os.getenv('SMTP_USERNAME', 'sodagaramaan786@gmail.com')
-# SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', 'gsin qzbq xuqw qihp')
-SMTP_USERNAME = os.getenv('SMTP_USERNAME' , 'info@aesasolutions.com')
-SMTP_PASSWORD = os.getenv('SMTP_PASSWORD' , 'xgha wzcd bxnw nfnm')
+SMTP_USERNAME = 'sodagaramaan786@gmail.com'
+SMTP_PASSWORD = 'gsin qzbq xuqw qihp'
+# SMTP_USERNAME = os.getenv('SMTP_USERNAME' , 'info@aesasolutions.com')
+# SMTP_PASSWORD = os.getenv('SMTP_PASSWORD' , 'xgha wzcd bxnw nfnm')
 
 
 from middlewares.auth import token_required
@@ -1605,7 +1606,7 @@ def add_pickup_request(order_id):
             headers=headers,
             data={
                 'data': json.dumps(payload),
-                'format': 'json'  #  Important to add this
+                'format': 'json'  #  Important to add this
             }
         )
 
@@ -1635,7 +1636,7 @@ def add_pickup_request(order_id):
                 'waybill': order.awb_number,
                 'upload_wbn': order.upload_wbn,
                 'fulfillment_status': True,  # Added to response
-                'delhivery_payload_sent': payload,   #  Add this line
+                'delhivery_payload_sent': payload,   #  Add this line
                 'response': response_data
             }), 200
         except Exception as e:
@@ -1646,27 +1647,6 @@ def add_pickup_request(order_id):
         return jsonify({'error': str(e)}), 500
     
 
-# @order_bp.route('/order/<string:order_id>/track',methods=['GET'])
-# @token_required(roles=['customer'])
-# def track_order(order_id):
-
-#        try:
-#            order = Order.query.filter_by(order_id=order_id).first()
-#            if not order:
-#                return jsonify({'error': 'Order not found'}), 404
-#            waybill=order.awb_number
-#            if not waybill:
-#                return jsonify({'error': 'Waybill not found'}), 404
-#            # Call the API to track the order
-           
-#            DELHIVERY_KEY = os.getenv("DELHIVERY_KEY")
-#            url = f"https://track.delhivery.com/api/v1/packages/json/?waybill={waybill}&token={DELHIVERY_KEY}"
-
-#            response = requests.get(url)
-#            response.raise_for_status()  # Raises HTTPError for bad responses (4xx/5xx)
-#            return response.json()
-#        except requests.exceptions.RequestException as e:
-#         return {'error': str(e)}
        
 
 @order_bp.route('/change-order-status/<string:order_id>' , methods=['POST'])
@@ -1905,46 +1885,212 @@ def update_payment_status(order_id):
         return jsonify({'error': str(e)}), 500
     
 
-@order_bp.route('/update-order-status/<string:order_id>', methods=['PUT'])
+# @order_bp.route('/update-order-status/<string:order_id>', methods=['PUT'])
+# @token_required(roles=['admin'])
+# def update_order_status(order_id):
+#     try:
+#         print(f"Received update request for order: {order_id}")  # Debug log
+        
+#         data = request.get_json()
+#         action = data.get('action')  # 'fulfill', 'shipped', or 'delivered'
+        
+#         if not action or action not in ['fulfill', 'shipped', 'delivered']:
+#             return jsonify({'error': 'Invalid action. Must be fulfill, shipped, or delivered'}), 400
+
+#         # No need to decode here - Flask automatically handles URL-safe characters
+#         order = Order.query.filter_by(order_id=order_id).first()
+#         if not order:
+#             print(f"Order {order_id} not found in database")
+#             return jsonify({'error': 'Order not found'}), 404
+
+#         # Track previous values
+#         prev_fulfillment = order.fulfillment_status
+#         prev_delivery = order.delivery_status
+
+#         # Status transition logic
+#         if action == 'fulfill':
+#             if order.fulfillment_status:
+#                 return jsonify({'message': 'Order is already fulfilled'}), 200
+#             order.fulfillment_status = True
+#             order.delivery_status = 'processing'  # Initial status after fulfillment
+
+#         elif action == 'shipped':
+#             if not order.fulfillment_status:
+#                 return jsonify({'error': 'Order must be fulfilled before shipping'}), 400
+#             if order.delivery_status == 'shipped':
+#                 return jsonify({'message': 'Order is already shipped'}), 200
+#             order.delivery_status = 'shipped'
+
+#         elif action == 'delivered':
+#             if order.delivery_status != 'shipped':
+#                 return jsonify({'error': 'Order must be shipped before marking as delivered'}), 400
+#             order.delivery_status = 'delivered'
+
+#         # Create status history record
+#         status_history = OrderStatusHistory(
+#             order_id=order.order_id,
+#             changed_by='admin',  
+#             from_status=f"fulfill:{prev_fulfillment}, delivery:{prev_delivery}",
+#             to_status=f"fulfill:{order.fulfillment_status}, delivery:{order.delivery_status}",
+#             change_reason=f"Status updated via {action} action"
+#         )
+#         db.session.add(status_history)
+        
+#         order.updated_at = datetime.now(tz=ZoneInfo('Asia/Kolkata'))
+#         db.session.commit()
+
+#         return jsonify({
+#             'message': f'Order status updated successfully',
+#             'order_id': order.order_id,
+#             'fulfillment_status': order.fulfillment_status,
+#             'delivery_status': order.delivery_status,
+#             'updated_at': order.updated_at.isoformat()
+#         }), 200
+
+#     except Exception as e:
+#         db.session.rollback()
+#         print(f"Error updating order {order_id}: {str(e)}")
+#         return jsonify({'error': str(e)}), 500
+
+
+@order_bp.route('/update-order-status/<string:order_id>', methods=['PUT']) 
 @token_required(roles=['admin'])
 def update_order_status(order_id):
     try:
-        print(f"Received update request for order: {order_id}")  # Debug log
+        print(f"\n[DEBUG] Received update request for order: {order_id}")
+        print(f"[DEBUG] Request data: {request.get_json()}")
         
         data = request.get_json()
         action = data.get('action')  # 'fulfill', 'shipped', or 'delivered'
         
         if not action or action not in ['fulfill', 'shipped', 'delivered']:
+            print("[ERROR] Invalid action provided")
             return jsonify({'error': 'Invalid action. Must be fulfill, shipped, or delivered'}), 400
 
-        # No need to decode here - Flask automatically handles URL-safe characters
         order = Order.query.filter_by(order_id=order_id).first()
         if not order:
-            print(f"Order {order_id} not found in database")
+            print(f"[ERROR] Order {order_id} not found in database")
             return jsonify({'error': 'Order not found'}), 404
+
+        # Get customer (either online or offline)
+        customer = None
+        if order.customer_id:
+            customer = Customer.query.get(order.customer_id)
+            print(f"[DEBUG] Found online customer: {customer.name} ({customer.email})")
+        elif order.offline_customer_id:
+            customer = OfflineCustomer.query.get(order.offline_customer_id)
+            print(f"[DEBUG] Found offline customer: {customer.name} ({customer.email})")
+            
+        if not customer:
+            print("[ERROR] No customer found for order")
+            return jsonify({'error': 'Customer not found'}), 404
 
         # Track previous values
         prev_fulfillment = order.fulfillment_status
         prev_delivery = order.delivery_status
+        print(f"[DEBUG] Current status - Fulfilled: {prev_fulfillment}, Delivery: {prev_delivery}")
+        print(f"[DEBUG] Attempting to update to: {action}")
 
         # Status transition logic
         if action == 'fulfill':
             if order.fulfillment_status:
+                print("[INFO] Order is already fulfilled")
                 return jsonify({'message': 'Order is already fulfilled'}), 200
             order.fulfillment_status = True
-            order.delivery_status = 'processing'  # Initial status after fulfillment
+            order.delivery_status = 'processing'
+            print("[SUCCESS] Order marked as fulfilled")
 
         elif action == 'shipped':
             if not order.fulfillment_status:
+                print("[ERROR] Cannot ship unfulfilled order")
                 return jsonify({'error': 'Order must be fulfilled before shipping'}), 400
             if order.delivery_status == 'shipped':
+                print("[INFO] Order is already shipped")
                 return jsonify({'message': 'Order is already shipped'}), 200
             order.delivery_status = 'shipped'
+            print("[SUCCESS] Order marked as shipped")
+
+            # Send shipped email notification
+            try:
+                subject = f"Your Order #{order_id} Has Been Shipped"
+                body = f"""
+                Dear {customer.name},
+                
+                We're excited to let you know that your order #{order_id} has been shipped!
+                
+                Order Details:
+                - Order ID: {order_id}
+                - Total Amount: ₹{order.total_amount}
+                - Shipping Method: {order.delivery_method}
+                - Tracking Number: {order.awb_number or 'Not available yet'}
+                
+                You can track your order using the tracking number above.
+                
+                Thank you for shopping with us!
+                
+                Best regards,
+                Your Store Team
+                """
+                
+                msg = MIMEText(body)
+                msg['Subject'] = subject
+                msg['From'] = SMTP_USERNAME
+                msg['To'] = customer.email
+                
+                print(f"[DEBUG] Attempting to send shipping email to {customer.email}")
+                with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                    server.starttls()
+                    server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                    server.send_message(msg)
+                print("[SUCCESS] Shipping email sent successfully")
+                
+            except Exception as email_error:
+                print(f"[ERROR] Failed to send shipping email: {str(email_error)}")
+                # Continue even if email fails
 
         elif action == 'delivered':
             if order.delivery_status != 'shipped':
+                print("[ERROR] Cannot mark as delivered before shipping")
                 return jsonify({'error': 'Order must be shipped before marking as delivered'}), 400
             order.delivery_status = 'delivered'
+            print("[SUCCESS] Order marked as delivered")
+
+            # Send delivered email notification
+            try:
+                subject = f"Your Order #{order_id} Has Been Delivered"
+                body = f"""
+                Dear {customer.name},
+                
+                Great news! Your order #{order_id} has been successfully delivered.
+                
+                Order Details:
+                - Order ID: {order_id}
+                - Total Amount: ₹{order.total_amount}
+                - Delivery Date: {datetime.now(tz=ZoneInfo('Asia/Kolkata')).strftime('%d %b %Y')}
+                
+                We hope you're happy with your purchase. If you have any questions, please don't hesitate to contact us.
+                
+                Thank you for shopping with us!
+                
+                Best regards,
+                Your Store Team
+                """
+                
+                msg = MIMEText(body)
+                msg['Subject'] = subject
+                msg['From'] = SMTP_USERNAME
+                msg['To'] = customer.email
+                
+                print(f"[DEBUG] Attempting to send delivery email to {customer.email}")
+                with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                    server.starttls()
+                    server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                    server.send_message(msg)
+                print("[SUCCESS] Delivery email sent successfully")
+                
+            except Exception as email_error:
+                print(f"[ERROR] Failed to send delivery email: {str(email_error)}")
+                # Continue even if email fails
 
         # Create status history record
         status_history = OrderStatusHistory(
@@ -1958,19 +2104,28 @@ def update_order_status(order_id):
         
         order.updated_at = datetime.now(tz=ZoneInfo('Asia/Kolkata'))
         db.session.commit()
+        print("[SUCCESS] Database changes committed")
 
-        return jsonify({
+        response = {
             'message': f'Order status updated successfully',
             'order_id': order.order_id,
             'fulfillment_status': order.fulfillment_status,
             'delivery_status': order.delivery_status,
             'updated_at': order.updated_at.isoformat()
-        }), 200
+        }
+        
+        print(f"[DEBUG] Returning response: {response}")
+        return jsonify(response), 200
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error updating order {order_id}: {str(e)}")
+        print(f"[ERROR] Failed to update order {order_id}: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+
+
+
 
 @order_bp.route('/order/<string:order_id>/track',methods=['GET'])
 @token_required(roles=['customer', 'admin']) 
@@ -2538,6 +2693,7 @@ def update_awb():
 @order_bp.route('/orders/<order_id>/remarks', methods=['PUT'])
 @token_required(roles=['admin'])
 def update_order_remarks( order_id):
+
     data = request.get_json()
     remarks = data.get('remarks')
 
@@ -2553,3 +2709,74 @@ def update_order_remarks( order_id):
         'message': 'Remarks updated successfully',
         'order_id': order.order_id
     }), 200
+
+
+@order_bp.route('/orders/<path:order_id>/change-address', methods=['POST'])
+@token_required(roles=['admin'])
+def change_order_address(order_id):
+    data = request.json
+    current_user = request.current_user
+    
+    # Get the order
+    order = Order.query.filter_by(order_id=order_id).first()
+    if not order:
+        return jsonify({'success': False, 'message': 'Order not found'}), 404
+    
+    # Validate required fields
+    required_fields = ['name', 'mobile', 'pincode', 'locality', 'address_line', 'city', 'state_id']
+    for field in required_fields:
+        if field not in data or not data[field]:
+            return jsonify({
+                'success': False,
+                'message': f'Missing required field: {field}'
+            }), 400
+    
+    # Check if pincode is serviceable
+    service_check = is_service_available(data['pincode'])
+    if not service_check['success']:
+        return jsonify(service_check), 400
+    
+    try:
+        # Create new address
+        new_address = Address(
+            name=data['name'],
+            mobile=data['mobile'],
+            pincode=data['pincode'],
+            locality=data['locality'],
+            address_line=data['address_line'],
+            city=data['city'],
+            state_id=data['state_id'],
+            landmark=data.get('landmark'),
+            alternate_phone=data.get('alternate_phone'),
+            address_type=data.get('address_type', 'Home'),
+            is_available=service_check['success'],
+            latitude=data.get('latitude'),
+            longitude=data.get('longitude')
+        )
+        
+        # Link to appropriate customer
+        if order.customer_id:
+            new_address.customer_id = order.customer_id
+        elif order.offline_customer_id:
+            new_address.offline_customer_id = order.offline_customer_id
+        
+        db.session.add(new_address)
+        db.session.flush()  # To get the new address_id
+        
+        # Update order with new address
+        order.address_id = new_address.address_id
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Address updated successfully',
+            'address': new_address.to_dict(),
+            'order_id': order.order_id
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'message': f'Error updating address: {str(e)}'
+        }), 500

@@ -25,7 +25,7 @@ products_bp = Blueprint('products', __name__)
 @products_bp.route('/products', methods=['GET'])
 def list_products(): 
     try:
-        products = Product.query.options(
+        products = Product.query.filter(Product.is_visible == True).options(
             db.joinedload(Product.images),
             db.joinedload(Product.main_category),
             db.joinedload(Product.sub_category),
@@ -354,7 +354,8 @@ def get_similar_products(product_id):
         similar_products = Product.query.filter(
             Product.product_id != product_id,
             Product.main_category.has(category_id=current_product.main_category.category_id),
-            Product.product_type == current_product.product_type
+            Product.product_type == current_product.product_type,
+            Product.is_visible == True
         ).options(
             db.joinedload(Product.images),
             db.joinedload(Product.main_category),
@@ -1018,43 +1019,65 @@ def partially_update_product(product_id):
         return jsonify({'error': str(e)}), 400
 
 # Delete a product
+# @products_bp.route('/<int:product_id>', methods=['DELETE'])
+# def delete_product(product_id):
+#     product = Product.query.get_or_404(product_id)
+    
+#     # First delete all related cart items
+#     try:
+#         # Delete cart items associated with this product
+#         CartItem.query.filter_by(product_id=product_id).delete()
+#         WishlistItem.query.filter_by(product_id=product_id).delete()
+
+        
+#         # Get all image paths to delete files from filesystem
+#         image_paths = []
+#         for image in product.images:
+#             if image.image_url and not image.image_url.startswith('http'):
+#                 image_paths.append(image.image_url.replace('/product_images/', ''))
+        
+#         # Delete product from database (cascade will handle other related records)
+#         db.session.delete(product)
+#         db.session.commit()
+        
+#         # Delete image files from filesystem
+#         for img_path in image_paths:
+#             try:
+#                 file_path = os.path.join(UPLOAD_FOLDER, img_path)
+#                 if os.path.exists(file_path):
+#                     os.remove(file_path)
+#             except Exception as e:
+#                 # Log error but continue with other operations
+#                 print(f"Error deleting file {img_path}: {str(e)}")
+        
+#         return jsonify({'message': 'Product deleted successfully'}), 200
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({'error': str(e)}), 400
+    
 @products_bp.route('/<int:product_id>', methods=['DELETE'])
 def delete_product(product_id):
     product = Product.query.get_or_404(product_id)
     
-    # First delete all related cart items
     try:
-        # Delete cart items associated with this product
-        CartItem.query.filter_by(product_id=product_id).delete()
-        WishlistItem.query.filter_by(product_id=product_id).delete()
-
+        # Instead of deleting, set is_visible to False
+        product.is_visible = False
+        product.updated_at = datetime.utcnow()
         
-        # Get all image paths to delete files from filesystem
-        image_paths = []
-        for image in product.images:
-            if image.image_url and not image.image_url.startswith('http'):
-                image_paths.append(image.image_url.replace('/product_images/', ''))
+        # No need to delete cart items or wishlist items - they can remain
+        # as they might be part of order history
         
-        # Delete product from database (cascade will handle other related records)
-        db.session.delete(product)
         db.session.commit()
         
-        # Delete image files from filesystem
-        for img_path in image_paths:
-            try:
-                file_path = os.path.join(UPLOAD_FOLDER, img_path)
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except Exception as e:
-                # Log error but continue with other operations
-                print(f"Error deleting file {img_path}: {str(e)}")
+        return jsonify({
+            'message': 'Product marked as not visible',
+            'product_id': product_id,
+            'is_visible': False
+        }), 200
         
-        return jsonify({'message': 'Product deleted successfully'}), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
-    
-
 
 # ----- Product Images Routes -----
 # UPDATE COVER IMAGE 
