@@ -164,6 +164,8 @@ def post_simple_review():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+
+
 @reviews_bp.route('/reviews/customer/<int:customer_id>', methods=['GET'])
 def get_reviews_by_customer(customer_id):
     """

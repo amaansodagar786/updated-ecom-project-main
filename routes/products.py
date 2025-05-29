@@ -6,7 +6,7 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models.cart import Cart,CartItem
 from models.wishlist import Wishlist,WishlistItem
-from models.product import Product, ProductImage, ProductModel, ProductColor, ModelSpecification , ProductSpecification
+from models.product import Product, ProductImage, ProductModel, ProductColor, ModelSpecification , ProductSpecification , ProductFile
 from models.category import Category, Subcategory
 from models.hsn import HSN
 from uuid import uuid4
@@ -33,6 +33,8 @@ def list_products():
             db.joinedload(Product.models).joinedload(ProductModel.specifications),
             db.joinedload(Product.colors).joinedload(ProductColor.images),
             db.joinedload(Product.hsn),
+            db.joinedload(Product.files),  # Add this to load files eagerly
+            db.joinedload(Product.models).joinedload(ProductModel.colors).joinedload(ProductColor.files)  # For model-specific color files
         ).all()
         
         products_list = []
@@ -46,11 +48,18 @@ def list_products():
                 'hsn': product.hsn.hsn_code if product.hsn else None,
                 'sku_id': product.sku_id,                
                 'product_type': product.product_type,
-                'rating': product.rating,  # Average rating
+                'rating': product.rating,
                 'offers': product.offers,
-                'raters': product.raters,  # Total number of raters
+                'raters': product.raters,
                 'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in product.images],
                 'specifications': [{'spec_id': s.spec_id, 'key': s.key, 'value': s.value} for s in product.specifications],
+                'files': [{
+                    'file_id': f.file_id,
+                    'file_url': f.file_url,
+                    'file_type': f.file_type,
+                    'original_filename': f.original_filename,
+                    'created_at': f.created_at.isoformat() if f.created_at else None
+                } for f in product.files],
             }
             
             # Add models for all product types
@@ -63,8 +72,10 @@ def list_products():
                     'description': model.description,
                     'colors': [],
                     'specifications': [
-                        {'spec_id': spec.spec_id , 'key': spec.key, 'value': spec.value} for spec in model.specifications
-                    ]
+                        {'spec_id': spec.spec_id, 'key': spec.key, 'value': spec.value} 
+                        for spec in model.specifications
+                    ],
+                    
                 }
                 
                 for color in model.colors:
@@ -75,7 +86,8 @@ def list_products():
                         'price': float(color.price),
                         'original_price': float(color.original_price) if color.original_price else None,
                         'threshold': color.threshold,
-                        'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
+                        'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images],
+                        
                     }
                     model_dict['colors'].append(color_dict)
                 
@@ -93,7 +105,8 @@ def list_products():
                         'price': float(color.price),
                         'original_price': float(color.original_price) if color.original_price else None,
                         'threshold': color.threshold,
-                        'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images]
+                        'images': [{'image_id': img.image_id, 'image_url': img.image_url} for img in color.images],
+                        
                     }
                     product_dict['colors'].append(color_dict)
             
@@ -451,42 +464,24 @@ def get_product_price_info(product):
 
 
 
-@products_bp.route('/offers/update', methods=['POST'])
-def update_offer():
+@products_bp.route('/offers', methods=['POST'])
+def handle_offers():
     try:
         data = request.get_json()
-        print("Received data:", data)  # ✅ Debug log
-
         product_id = data.get('product_id')
-        offer_value = data.get('offer_value')
-        print(f"Parsed product_id: {product_id}, offer_value: {offer_value}")  # ✅ Debug log
+        offer_text = data.get('offer_text')
 
         if not product_id:
-            print("Error: Product ID is missing")  # ✅ Debug log
             return jsonify({'error': 'Product ID is required'}), 400
-
-        # Validate offer value (either None or between 0-100)
-        if offer_value is not None:
-            try:
-                offer_value = int(offer_value)
-                if offer_value < 0 or offer_value > 100:
-                    print("Error: Offer out of range")  # ✅ Debug log
-                    return jsonify({'error': 'Offer must be between 0 and 100'}), 400
-            except ValueError:
-                print("Error: Offer is not a valid integer")  # ✅ Debug log
-                return jsonify({'error': 'Invalid offer value'}), 400
 
         product = Product.query.get(product_id)
         if not product:
-            print(f"Error: Product with ID {product_id} not found")  # ✅ Debug log
             return jsonify({'error': 'Product not found'}), 404
 
-        # Update the offer
-        product.offers = str(offer_value) if offer_value is not None else None
+        # Update or create the offer
+        product.offers = offer_text if offer_text else None
         product.updated_at = datetime.utcnow()
         db.session.commit()
-
-        print(f"Offer updated: Product ID {product_id}, New offer: {product.offers}")  # ✅ Debug log
 
         return jsonify({
             'message': 'Offer updated successfully',
@@ -496,7 +491,27 @@ def update_offer():
 
     except Exception as e:
         db.session.rollback()
-        print("Exception occurred:", str(e))  # ✅ Debug log
+        return jsonify({'error': str(e)}), 500
+
+@products_bp.route('/offers/<int:product_id>', methods=['DELETE'])
+def delete_offer(product_id):
+    try:
+        product = Product.query.get(product_id)
+        if not product:
+            return jsonify({'error': 'Product not found'}), 404
+
+        # Remove the offer
+        product.offers = None
+        product.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Offer removed successfully',
+            'product_id': product.product_id
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 
@@ -530,7 +545,6 @@ def get_categories():
         return jsonify({'error': str(e)}), 500
 
 
-
 # ROUTE FOR HSN 
 @products_bp.route('/hsn', methods=['GET'])
 def get_hsn():
@@ -552,37 +566,95 @@ def get_hsn():
         return jsonify({'error': str(e)}), 500
 
 
-
-UPLOAD_FOLDER = 'static/product_images'
-ALLOWED_EXTENSIONS = {
-    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp',
-    'svg', 'ico', 'heif', 'heic', 'raw', 'psd', 'ai', 'eps', 'jfif',
-    'avif' , 'mp4'
+# Ensure these are at the top of your Flask app configuration
+FILE_UPLOAD_FOLDER = 'static/files'
+ALLOWED_FILE_EXTENSIONS = {
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 
+    'txt', 'csv', 'zip', 'rar', 'mp3', 'wav', 'avi', 
+    'mov', 'flv', 'mkv', 'webm', 'ogg', 'exe'
 }
 
+UPLOAD_FOLDER = 'static/product_images'
+ALLOWED_IMAGE_EXTENSIONS = {
+    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp',
+    'svg', 'ico', 'heif', 'heic', 'raw', 'psd', 'ai', 'eps', 'jfif',
+    'avif', 'mp4'
+}
 
-def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+# Unified file validation function
+def allowed_file(filename, allowed_extensions):
+    if not filename or '.' not in filename:
+        return False
+    ext = filename.rsplit('.', 1)[1].lower()
+    return ext in allowed_extensions
 
+# Document file handling
+def save_file(file):
+    try:
+        if not file or file.filename == '':
+            print("No file or empty filename provided")
+            return None
+            
+        if not allowed_file(file.filename, ALLOWED_FILE_EXTENSIONS):
+            print(f"File type not allowed: {file.filename}")
+            print(f"Allowed document extensions: {ALLOWED_FILE_EXTENSIONS}")
+            return None
+            
+        filename = f"{uuid4().hex}_{secure_filename(file.filename)}"
+        file_path = os.path.join(FILE_UPLOAD_FOLDER, filename)
+        
+        # Ensure directory exists with proper permissions
+        os.makedirs(FILE_UPLOAD_FOLDER, exist_ok=True)
+        os.chmod(FILE_UPLOAD_FOLDER, 0o755)
+        
+        # Save file
+        file.save(file_path)
+        print(f"Successfully saved document: {file_path}")
+        return f'/files/{filename}'
+        
+    except Exception as e:
+        print(f"Error saving document {file.filename if file else 'unknown'}: {str(e)}")
+        return None
+
+# Image file handling
 def save_image(image_file):
-    if image_file and allowed_file(image_file.filename):
-        # Generate unique filename
+    try:
+        if not image_file or image_file.filename == '':
+            print("No image or empty filename provided")
+            return None
+            
+        if not allowed_file(image_file.filename, ALLOWED_IMAGE_EXTENSIONS):
+            print(f"Image type not allowed: {image_file.filename}")
+            print(f"Allowed image extensions: {ALLOWED_IMAGE_EXTENSIONS}")
+            return None
+            
         filename = f"{uuid4().hex}_{secure_filename(image_file.filename)}"
         file_path = os.path.join(UPLOAD_FOLDER, filename)
         
+        # Ensure directory exists with proper permissions
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        os.chmod(UPLOAD_FOLDER, 0o755)
+        
         # Save file
         image_file.save(file_path)
+        print(f"Successfully saved image: {file_path}")
         return f'/product_images/{filename}'
-    return None
+        
+    except Exception as e:
+        print(f"Error saving image {image_file.filename if image_file else 'unknown'}: {str(e)}")
+        return None
+
+
+
 
 
 
 @products_bp.route('/product/add', methods=['POST'])
 @token_required(roles=['admin'])
 def add_product():
-    # Ensure upload directory exists
+    # Ensure upload directories exist
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    os.makedirs(FILE_UPLOAD_FOLDER, exist_ok=True)
 
     try:
         # Extract basic product information
@@ -626,7 +698,6 @@ def add_product():
             hsn_id = new_hsn.hsn_id
 
         # Validate required fields
-        print(name, description, category_id, product_type)
         if not all([name, description, category_id, product_type]):
             return jsonify({'message': 'Missing required product details'}), 400
 
@@ -655,13 +726,39 @@ def add_product():
                 )
                 db.session.add(product_image)
 
+        # Handle product-level files
+        product_files = request.files.getlist('product_files')
+        file_types = request.form.getlist('file_type')
+
+        print(f"Received {len(product_files)} files to process")
+
+        for i, file in enumerate(product_files):
+            if file and file.filename != '':
+                print(f"Processing file {i}: {file.filename}")
+                print(f"File content type: {file.content_type}")
+                print(f"File size: {len(file.read())} bytes")
+                file.seek(0)  # Reset file pointer after reading
+                
+                file_url = save_file(file)
+                if file_url:
+                    print(f"File saved at: {file_url}")
+                    file_type = file_types[i] if i < len(file_types) else 'document'
+                    product_file = ProductFile(
+                        product_id=new_product.product_id,
+                        file_url=file_url,
+                        file_type=file_type,
+                        original_filename=secure_filename(file.filename)
+                    )
+                    db.session.add(product_file)
+                    db.session.flush()
+                else:
+                    print(f"Failed to save file: {file.filename}")
+
         # Handle Single Product
         if product_type == 'single':
-            # Get model name and description from new fields, fallback to product values if not provided
             model_name = request.form.get('model_name', name)
             model_description = request.form.get('model_description', description)
             
-            # Create default model for single product with specific model name and description
             default_model = ProductModel(
                 product_id=new_product.product_id,
                 name=model_name,
@@ -716,6 +813,22 @@ def add_product():
                                 image_url=image_url
                             )
                             db.session.add(image)
+
+                    # Process color files
+                    color_files = request.files.getlist(f'color_files_{i}')
+                    color_file_types = request.form.getlist(f'color_file_type_{i}')
+                    for j, file in enumerate(color_files):
+                        if file and file.filename != '':
+                            file_url = save_file(file)
+                            if file_url:
+                                product_file = ProductFile(
+                                    product_id=new_product.product_id,
+                                    color_id=color.color_id,
+                                    file_url=file_url,
+                                    file_type=color_file_types[j] if j < len(color_file_types) else 'document',
+                                    original_filename=secure_filename(file.filename)
+                                )
+                                db.session.add(product_file)
 
         # Handle Variable Product
         elif product_type == 'variable':
@@ -779,35 +892,168 @@ def add_product():
                                         image_url=image_url
                                     )
                                     db.session.add(image)
+
+                            # Process color files
+                            color_files = request.files.getlist(f'model_{i}_color_files_{j}')
+                            color_file_types = request.form.getlist(f'model_{i}_color_file_type_{j}')
+                            for k, file in enumerate(color_files):
+                                if file and file.filename != '':
+                                    file_url = save_file(file)
+                                    if file_url:
+                                        product_file = ProductFile(
+                                            product_id=new_product.product_id,
+                                            color_id=color.color_id,
+                                            file_url=file_url,
+                                            file_type=color_file_types[k] if k < len(color_file_types) else 'document',
+                                            original_filename=secure_filename(file.filename)
+                                        )
+                                        db.session.add(product_file)
         
-        hsn_code = ""
-        if hsn_id:
-            hsn_code = db.session.query(HSN.hsn_code).filter(HSN.hsn_id == hsn_id).scalar() or "NA"
-        else:
-            hsn_code = "NA"
-
-        # Format the SKU ID
+        # Generate SKU ID
+        hsn_code = db.session.query(HSN.hsn_code).filter(HSN.hsn_id == hsn_id).scalar() if hsn_id else "NA"
         sku_id = f"{category_id}-{subcategory_id}-{hsn_code}-{new_product.product_id}"
-
-        # Update the product with the SKU ID
         new_product.sku_id = sku_id
 
-
-        # Commit all changes
         db.session.commit()
 
-
-        logger.info(f"Product added by admin: {request.current_user.email} - Product ID: {new_product.product_id}")
+        logger.info(f"Product with files added by admin: {request.current_user.email} - Product ID: {new_product.product_id}")
 
         return jsonify({
-            'message': 'Product added successfully!',
+            'message': 'Product added successfully with files!',
             'product_id': new_product.product_id
         }), 201
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error adding product by {request.current_user.email}: {str(e)}")
+        logger.error(f"Error adding product with files by {request.current_user.email}: {str(e)}")
         return jsonify({'message': f'An error occurred while adding the product: {str(e)}'}), 500
+
+
+
+@products_bp.route('/product/<int:product_id>/files', methods=['POST'])
+@token_required(roles=['admin'])
+def add_product_file(product_id):
+    try:
+        product = Product.query.get_or_404(product_id)
+        file = request.files.get('file')
+        file_type = request.form.get('file_type', 'document')
+        color_id = request.form.get('color_id', None)
+
+        if not file or file.filename == '':
+            return jsonify({'message': 'No file selected'}), 400
+
+        file_url = save_file(file)
+        if not file_url:
+            return jsonify({'message': 'Invalid file type'}), 400
+
+        new_file = ProductFile(
+            product_id=product_id,
+            color_id=color_id,
+            file_url=file_url,
+            file_type=file_type,
+            original_filename=secure_filename(file.filename)
+        )
+        db.session.add(new_file)
+        db.session.commit()
+
+        return jsonify({
+            'message': 'File added successfully',
+            'file_id': new_file.file_id,
+            'file_url': new_file.file_url
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error adding file to product {product_id}: {str(e)}")
+        return jsonify({'message': f'Error adding file: {str(e)}'}), 500
+
+
+@products_bp.route('/product/files/<int:file_id>', methods=['PUT'])
+@token_required(roles=['admin'])
+def update_product_file(file_id):
+    try:
+        product_file = ProductFile.query.get_or_404(file_id)
+        file = request.files.get('file')
+        file_type = request.form.get('file_type', product_file.file_type)
+
+        if file and file.filename != '':
+            # Delete old file
+            old_file_path = os.path.join(FILE_UPLOAD_FOLDER, product_file.file_url.split('/')[-1])
+            if os.path.exists(old_file_path):
+                os.remove(old_file_path)
+
+            # Save new file
+            file_url = save_file(file)
+            if not file_url:
+                return jsonify({'message': 'Invalid file type'}), 400
+
+            product_file.file_url = file_url
+            product_file.original_filename = secure_filename(file.filename)
+
+        product_file.file_type = file_type
+        db.session.commit()
+
+        return jsonify({
+            'message': 'File updated successfully',
+            'file_id': product_file.file_id,
+            'file_url': product_file.file_url
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating file {file_id}: {str(e)}")
+        return jsonify({'message': f'Error updating file: {str(e)}'}), 500
+
+
+@products_bp.route('/product/files/<int:file_id>', methods=['DELETE'])
+@token_required(roles=['admin'])
+def delete_product_file(file_id):
+    try:
+        product_file = ProductFile.query.get_or_404(file_id)
+        
+        # Delete physical file
+        file_path = os.path.join(FILE_UPLOAD_FOLDER, product_file.file_url.split('/')[-1])
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        db.session.delete(product_file)
+        db.session.commit()
+
+        return jsonify({'message': 'File deleted successfully'})
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error deleting file {file_id}: {str(e)}")
+        return jsonify({'message': f'Error deleting file: {str(e)}'}), 500
+
+
+@products_bp.route('/product/<int:product_id>/files', methods=['GET'])
+@token_required()
+def get_product_files(product_id):
+    try:
+        product = Product.query.get_or_404(product_id)
+        color_id = request.args.get('color_id', None)
+
+        query = ProductFile.query.filter_by(product_id=product_id)
+        if color_id:
+            query = query.filter_by(color_id=color_id)
+
+        files = query.all()
+        
+        files_data = [{
+            'file_id': f.file_id,
+            'file_url': f.file_url,
+            'file_type': f.file_type,
+            'original_filename': f.original_filename,
+            'created_at': f.created_at.isoformat(),
+            'color_id': f.color_id
+        } for f in files]
+
+        return jsonify({'files': files_data})
+
+    except Exception as e:
+        logger.error(f"Error getting files for product {product_id}: {str(e)}")
+        return jsonify({'message': f'Error getting files: {str(e)}'}), 500
 
 
 # ADD HSN 
@@ -945,6 +1191,7 @@ def get_products_by_category(category_id):
             'product_type': product.product_type,
             'rating': product.rating,
             'raters': product.raters,
+            'offers': product.offers,  # <-- Added this line
             'created_at': product.created_at.isoformat(),
             'updated_at': product.updated_at.isoformat(),
             # 'unit': product.unit,
@@ -1018,42 +1265,7 @@ def partially_update_product(product_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
 
-# Delete a product
-# @products_bp.route('/<int:product_id>', methods=['DELETE'])
-# def delete_product(product_id):
-#     product = Product.query.get_or_404(product_id)
-    
-#     # First delete all related cart items
-#     try:
-#         # Delete cart items associated with this product
-#         CartItem.query.filter_by(product_id=product_id).delete()
-#         WishlistItem.query.filter_by(product_id=product_id).delete()
 
-        
-#         # Get all image paths to delete files from filesystem
-#         image_paths = []
-#         for image in product.images:
-#             if image.image_url and not image.image_url.startswith('http'):
-#                 image_paths.append(image.image_url.replace('/product_images/', ''))
-        
-#         # Delete product from database (cascade will handle other related records)
-#         db.session.delete(product)
-#         db.session.commit()
-        
-#         # Delete image files from filesystem
-#         for img_path in image_paths:
-#             try:
-#                 file_path = os.path.join(UPLOAD_FOLDER, img_path)
-#                 if os.path.exists(file_path):
-#                     os.remove(file_path)
-#             except Exception as e:
-#                 # Log error but continue with other operations
-#                 print(f"Error deleting file {img_path}: {str(e)}")
-        
-#         return jsonify({'message': 'Product deleted successfully'}), 200
-#     except Exception as e:
-#         db.session.rollback()
-#         return jsonify({'error': str(e)}), 400
     
 @products_bp.route('/<int:product_id>', methods=['DELETE'])
 def delete_product(product_id):

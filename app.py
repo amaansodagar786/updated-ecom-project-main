@@ -65,6 +65,11 @@ def serve_product_image(filename):
     return send_from_directory(os.path.join(app.static_folder, 'product_images'), filename)
 
 
+@app.route('/files/<filename>')
+def serve_product_file(filename):
+    return send_from_directory(os.path.join(app.static_folder, 'files'), filename)
+
+
 
 
 app.config['SECRET_KEY'] = secrets.token_hex(32)

@@ -1885,73 +1885,6 @@ def update_payment_status(order_id):
         return jsonify({'error': str(e)}), 500
     
 
-# @order_bp.route('/update-order-status/<string:order_id>', methods=['PUT'])
-# @token_required(roles=['admin'])
-# def update_order_status(order_id):
-#     try:
-#         print(f"Received update request for order: {order_id}")  # Debug log
-        
-#         data = request.get_json()
-#         action = data.get('action')  # 'fulfill', 'shipped', or 'delivered'
-        
-#         if not action or action not in ['fulfill', 'shipped', 'delivered']:
-#             return jsonify({'error': 'Invalid action. Must be fulfill, shipped, or delivered'}), 400
-
-#         # No need to decode here - Flask automatically handles URL-safe characters
-#         order = Order.query.filter_by(order_id=order_id).first()
-#         if not order:
-#             print(f"Order {order_id} not found in database")
-#             return jsonify({'error': 'Order not found'}), 404
-
-#         # Track previous values
-#         prev_fulfillment = order.fulfillment_status
-#         prev_delivery = order.delivery_status
-
-#         # Status transition logic
-#         if action == 'fulfill':
-#             if order.fulfillment_status:
-#                 return jsonify({'message': 'Order is already fulfilled'}), 200
-#             order.fulfillment_status = True
-#             order.delivery_status = 'processing'  # Initial status after fulfillment
-
-#         elif action == 'shipped':
-#             if not order.fulfillment_status:
-#                 return jsonify({'error': 'Order must be fulfilled before shipping'}), 400
-#             if order.delivery_status == 'shipped':
-#                 return jsonify({'message': 'Order is already shipped'}), 200
-#             order.delivery_status = 'shipped'
-
-#         elif action == 'delivered':
-#             if order.delivery_status != 'shipped':
-#                 return jsonify({'error': 'Order must be shipped before marking as delivered'}), 400
-#             order.delivery_status = 'delivered'
-
-#         # Create status history record
-#         status_history = OrderStatusHistory(
-#             order_id=order.order_id,
-#             changed_by='admin',  
-#             from_status=f"fulfill:{prev_fulfillment}, delivery:{prev_delivery}",
-#             to_status=f"fulfill:{order.fulfillment_status}, delivery:{order.delivery_status}",
-#             change_reason=f"Status updated via {action} action"
-#         )
-#         db.session.add(status_history)
-        
-#         order.updated_at = datetime.now(tz=ZoneInfo('Asia/Kolkata'))
-#         db.session.commit()
-
-#         return jsonify({
-#             'message': f'Order status updated successfully',
-#             'order_id': order.order_id,
-#             'fulfillment_status': order.fulfillment_status,
-#             'delivery_status': order.delivery_status,
-#             'updated_at': order.updated_at.isoformat()
-#         }), 200
-
-#     except Exception as e:
-#         db.session.rollback()
-#         print(f"Error updating order {order_id}: {str(e)}")
-#         return jsonify({'error': str(e)}), 500
-
 
 @order_bp.route('/update-order-status/<string:order_id>', methods=['PUT']) 
 @token_required(roles=['admin'])
@@ -2121,8 +2054,6 @@ def update_order_status(order_id):
         db.session.rollback()
         print(f"[ERROR] Failed to update order {order_id}: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
-
-
 
 
 

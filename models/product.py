@@ -18,7 +18,7 @@ class Product(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     sku_id = db.Column(db.String(100), nullable=True, unique=True)
-    offers = db.Column(db.String(10), nullable=True, default=None)
+    offers = db.Column(db.String(20), nullable=True, default=None)
     is_visible = db.Column(db.Boolean, default=True, nullable=False)
     
     
@@ -29,6 +29,8 @@ class Product(db.Model):
     colors = db.relationship('ProductColor', backref='product', lazy=True, cascade="all, delete-orphan")
     specifications = db.relationship('ProductSpecification', backref='product', lazy=True, cascade="all, delete-orphan")
     reviews = db.relationship('Review', backref='product', lazy=True, cascade="all, delete-orphan")
+    files = db.relationship('ProductFile', back_populates='product', lazy=True, cascade="all, delete-orphan")
+
 
 
     def update_rating(self):
@@ -94,5 +96,18 @@ class ModelSpecification(db.Model):
     key = db.Column(db.String(100), nullable=False)
     value = db.Column(db.String(255), nullable=False)
 
+class ProductFile(db.Model):
+    __tablename__ = 'product_files'
+    
+    file_id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.product_id'), nullable=True)
+    color_id = db.Column(db.Integer, db.ForeignKey('product_colors.color_id'), nullable=True)
+    file_url = db.Column(db.String(255), nullable=False)
+    file_type = db.Column(db.String(50), nullable=False)  # e.g., 'manual', 'spec_sheet', 'certificate'
+    original_filename = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # Relationships
+    product = db.relationship('Product', back_populates='files')
+    color = db.relationship('ProductColor', backref='files')
     
