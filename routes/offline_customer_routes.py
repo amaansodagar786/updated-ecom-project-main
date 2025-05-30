@@ -19,7 +19,9 @@ def create_offline_customer():
         name=data['name'],
         mobile=data.get('mobile'),
         email=data['email'],
-        csp_code=data.get('csp_code')
+        csp_code=data.get('csp_code'),
+        gst_number=data.get('gst_number'),
+        
     )
     
     db.session.add(new_customer)

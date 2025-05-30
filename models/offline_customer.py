@@ -17,6 +17,8 @@ class OfflineCustomer(UserMixin, db.Model):
 
     #CSP CODE FIELD
     csp_code = db.Column(db.String(100), nullable=True, default=None)
+
+    gst_number = db.Column(db.String(50), nullable=True, default=None)
     
     
     # Relationships

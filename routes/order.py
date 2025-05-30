@@ -657,9 +657,15 @@ def create_order():
     # Using the correct GST calculation method (18% of subtotal excluding GST)
     subtotal_without_gst = amount_after_discount / Decimal('1.18')
     gst = amount_after_discount - subtotal_without_gst
+
+    is_free_delivery = data.get('is_free_delivery', False)
     
-    # Calculate delivery charge
-    delivery_charge = calculateDelivery(subtotal)
+    if is_free_delivery:
+        delivery_charge = Decimal('0')
+    else:
+        # Use your existing calculateDelivery function
+        delivery_charge = calculateDelivery(subtotal)
+    
     
     # Calculate final total - FIXED: Include GST properly
     total_amount = amount_after_discount + delivery_charge
@@ -683,6 +689,7 @@ def create_order():
             discount_percent=order_discount_percent,  # Order-level discount percent
             # discount_amount=total_discount_amount,  # FIXED: Store total discount amount
             delivery_charge=delivery_charge,
+            is_free_delivery=is_free_delivery,
             tax_percent=data.get('tax_percent', 0),
             total_amount=total_amount,  # This should now be consistent 
             gst=gst,
@@ -748,6 +755,7 @@ def create_order():
                 'subtotal_after_discount': float(amount_after_discount),
                 'gst': float(gst),
                 'delivery_charge': float(delivery_charge),
+                'is_free_delivery': is_free_delivery,
                 'total_amount': float(total_amount)
             }
         }), 201
