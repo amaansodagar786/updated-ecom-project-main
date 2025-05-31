@@ -18,7 +18,7 @@ class Product(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     sku_id = db.Column(db.String(100), nullable=True, unique=True)
-    offers = db.Column(db.String(20), nullable=True, default=None)
+    offers = db.Column(db.String(50), nullable=True, default=None)
     is_visible = db.Column(db.Boolean, default=True, nullable=False)
     
     

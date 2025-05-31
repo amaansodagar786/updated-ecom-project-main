@@ -141,36 +141,39 @@ def upload_device_transaction():
 
 
 
+
 @device_transaction_bp.route('/search-device', methods=['POST'])
-@token_required(roles=['admin', 'customer'])  # Adjust roles as needed
+@token_required(roles=['admin', 'customer'])  # Add or modify roles as needed
 def search_device():
     data = request.get_json()
     search_term = data.get('search_term')
-    
+
     if not search_term:
         return jsonify({'success': False, 'message': 'Search term required'}), 400
 
     try:
-        # Search by either device_srno or sku_id
+        # Fetch all transactions matching serial number or SKU
         transactions = DeviceTransaction.query.filter(
-            (DeviceTransaction.device_srno == search_term) | 
+            (DeviceTransaction.device_srno == search_term) |
             (DeviceTransaction.sku_id == search_term)
         ).order_by(DeviceTransaction.create_date).all()
 
         if not transactions:
             return jsonify({'success': False, 'message': 'No transactions found'}), 404
 
-        # Analyze transactions
+        # Find transaction types
         in_trans = next((t for t in transactions if t.in_out == 1), None)
         out_trans = next((t for t in transactions if t.in_out == 2), None)
         return_trans = next((t for t in transactions if t.in_out == 3), None)
 
+        # Base response with device details
         response = {
             'device_srno': transactions[0].device_srno,
             'sku_id': transactions[0].sku_id,
             'model_name': transactions[0].model_name
         }
 
+        # Determine status
         if return_trans:
             response['status'] = 'RETURN'
             response['message'] = 'Return transaction'
@@ -179,7 +182,7 @@ def search_device():
                 'remarks': return_trans.remarks
             }
         elif in_trans and out_trans:
-            profit = float(out_trans.price) - float(in_trans.price)
+            profit = float(out_trans.price or 0) - float(in_trans.price or 0)
             response['status'] = 'SOLD'
             response['profit'] = profit
             response['in_price'] = float(in_trans.price)
@@ -200,13 +203,26 @@ def search_device():
             response['status'] = 'UNKNOWN'
             response['message'] = 'Unexpected transaction combination'
 
+        # Add complete transaction history
+        response['transactions'] = [{
+            'device_srno': t.device_srno,
+            'model_name': t.model_name,
+            'sku_id': t.sku_id,
+            'order_id': t.order_id,
+            'in_out': t.in_out,
+            'create_date': t.create_date.isoformat(),
+            'price': float(t.price) if t.price is not None else None,
+            'remarks': t.remarks
+        } for t in transactions]
+
         return jsonify({'success': True, 'data': response})
 
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-    
+        return jsonify({'success': False, 'message': str(e)}), 500  
 
     
+
+
 
 @device_transaction_bp.route('/get-all-device-transactions', methods=['GET'])
 def get_all_device_transactions():
